@@ -9,11 +9,14 @@ _call_depth = 0
 TRACER_SCOPE = None  # Directory path to restrict tracing to
 
 class Tracer:
-    def __init__(self, scope_path=None):
+    def __init__(self, scope_path=None, exclude_paths=None, output_file=None):
         self.is_tracing = False
         self.log = []
         self.seen_functions = set()
         self.scope_path = scope_path
+        
+        # Add a flag to capture dunder methods
+        self.trace_dunder_methods = True
         
     def start(self):
         self.is_tracing = True
@@ -65,6 +68,22 @@ class Tracer:
     def get_trace_output(self):
         return "\n".join(self.log)
 
+    def _should_trace(self, frame):
+        """Determine if a frame should be traced based on scope and function name."""
+        file_path = frame.f_code.co_filename
+        func_name = frame.f_code.co_name
+        
+        # Ensure we capture __call__ and other special methods
+        should_exclude_dunder = (not self.trace_dunder_methods and 
+                                func_name.startswith('__') and 
+                                func_name != '__call__')
+        
+        if should_exclude_dunder:
+            return False
+            
+        # Continue with existing scope checks
+        return _is_in_scope(file_path)
+
 def _is_in_scope(file_path):
     """Check if a file is within the tracing scope."""
     global TRACER_SCOPE
@@ -110,7 +129,7 @@ def _trace_function(frame, event, arg):
             caller_info = _get_caller_info(frame)
             
             # Check if we should trace this file
-            if not _is_in_scope(file_path):
+            if not _tracer._should_trace(frame):
                 return _trace_function
                 
             # Skip special methods and common internals
