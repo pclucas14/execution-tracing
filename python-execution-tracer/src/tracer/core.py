@@ -21,8 +21,8 @@ class Tracer:
     def stop(self):
         self.is_tracing = False
     
-    def log_function_call(self, function_name, args, file_path=None, depth=0):
-        """Log a function call with context information."""
+    def log_function_call(self, function_name, args, file_path=None, line_number=None, caller_info=None, depth=0):
+        """Log a function call with context information and line numbers."""
         if not self.is_tracing:
             return
             
@@ -44,13 +44,22 @@ class Tracer:
         except Exception:
             args_str = {"error": "Could not format arguments"}
         
-        # Add file name prefix to function name
-        prefix = ""
+        # Prepare file and line information
+        location_info = ""
         if file_path:
-            prefix = f"{os.path.basename(file_path)} - "
+            location_info = f"{os.path.basename(file_path)}"
+            if line_number:
+                location_info += f":{line_number}"
+        
+        # Add caller information
+        call_source = ""
+        if caller_info:
+            caller_file, caller_line = caller_info
+            if caller_file and caller_line:
+                call_source = f" [called from {os.path.basename(caller_file)}:{caller_line}]"
         
         indent = "  " * depth
-        entry = f"{indent}{prefix}{function_name}: {args_str}"
+        entry = f"{indent}{location_info} - {function_name}{call_source}: {args_str}"
         self.log.append(entry)
     
     def get_trace_output(self):
@@ -70,6 +79,17 @@ def _is_in_scope(file_path):
     # Check if the file is within our defined scope
     return file_path.startswith(TRACER_SCOPE)
 
+def _get_caller_info(frame):
+    """Get the caller's file and line number."""
+    try:
+        # The caller is one frame back
+        caller = frame.f_back
+        if caller:
+            return (caller.f_code.co_filename, caller.f_lineno)
+    except Exception:
+        pass
+    return (None, None)
+
 def _trace_function(frame, event, arg):
     """Simple trace function that only traces functions within the defined scope."""
     global _tracer, _call_depth
@@ -84,6 +104,10 @@ def _trace_function(frame, event, arg):
             code = frame.f_code
             func_name = code.co_name
             file_path = code.co_filename
+            line_number = frame.f_lineno  # Line number where the function is defined
+            
+            # Get caller information
+            caller_info = _get_caller_info(frame)
             
             # Check if we should trace this file
             if not _is_in_scope(file_path):
@@ -121,6 +145,8 @@ def _trace_function(frame, event, arg):
                 func_name, 
                 arg_values, 
                 file_path,
+                line_number,
+                caller_info,
                 depth=_call_depth-1
             )
             
