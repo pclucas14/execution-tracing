@@ -9,14 +9,21 @@ _call_depth = 0
 TRACER_SCOPE = None  # Directory path to restrict tracing to
 
 class Tracer:
-    def __init__(self, scope_path=None, exclude_paths=None, output_file=None):
+    def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None):
         self.is_tracing = False
         self.log = []
         self.seen_functions = set()
         self.scope_path = scope_path
+        self.exclude_paths = exclude_paths or []
+        self.output_file = output_file
+        self.main_file = main_file
+        self.call_stack = []  # Track the call stack
         
         # Add a flag to capture dunder methods
         self.trace_dunder_methods = True
+        
+        # Initialize call depth
+        self.call_depth = 0
         
     def start(self):
         self.is_tracing = True
@@ -83,6 +90,64 @@ class Tracer:
             
         # Continue with existing scope checks
         return _is_in_scope(file_path)
+
+    def trace_function_call(self, frame, event, arg):
+        if not self.is_tracing:
+            return self.trace_function_call
+            
+        filename = frame.f_code.co_filename
+        func_name = frame.f_code.co_name
+        
+        if event == 'call':
+            # Increment call depth when entering a function
+            self.call_depth += 1
+            
+            if self.should_trace(filename, func_name):
+                # Format log entry with the current call depth for indentation
+                log_entry = self.format_log_entry(frame)
+                self.log.append(log_entry)
+                
+                if self.output_file:
+                    with open(self.output_file, 'a') as f:
+                        f.write(log_entry + '\n')
+        
+        elif event == 'return':
+            # Decrement call depth when leaving a function
+            if self.call_depth > 0:
+                self.call_depth -= 1
+        
+        return self.trace_function_call
+
+    def calculate_indent_level(self):
+        """Calculate indentation level based on distance from main file."""
+        # Find the position of the main file in the call stack
+        main_file_indices = [i for i, (filename, _) in enumerate(self.call_stack) 
+                             if self.main_file in filename]
+        
+        if not main_file_indices:
+            # If main file not found in stack, use the entire stack depth
+            return len(self.call_stack)
+        
+        # Use the position after the last occurrence of main file
+        main_file_pos = main_file_indices[-1]
+        return len(self.call_stack) - main_file_pos - 1
+
+    def format_log_entry(self, frame):
+        """Format a log entry with proper indentation based on call depth."""
+        func_name = frame.f_code.co_name
+        filename = os.path.basename(frame.f_code.co_filename)
+        lineno = frame.f_lineno
+        
+        # Get function arguments
+        args = self.get_function_args(frame)
+        
+        # Calculate indentation - use max(0, depth-1) to start with 0 tabs for the main file
+        indent = '\t' * max(0, self.call_depth - 1)
+        
+        # Add debugging info if needed
+        debug_info = f" [depth={self.call_depth}]" if self.debug else ""
+        
+        return f"{filename}:{lineno} - {func_name}{debug_info} {indent}[called from {self.get_caller_info()}]: {args}"
 
 def _is_in_scope(file_path):
     """Check if a file is within the tracing scope."""
@@ -190,7 +255,7 @@ def set_tracer_scope(scope_path):
     else:
         TRACER_SCOPE = None
 
-def start_tracing(scope_path=None):
+def start_tracing(scope_path=None, main_file=None):
     """Start tracing with a scope-limited approach."""
     global _tracer, _call_depth, TRACER_SCOPE
     
@@ -202,7 +267,7 @@ def start_tracing(scope_path=None):
         set_tracer_scope(scope_path)
     
     # Create and start the tracer
-    _tracer = Tracer(scope_path=TRACER_SCOPE)
+    _tracer = Tracer(scope_path=TRACER_SCOPE, main_file=main_file)
     _tracer.start()
     
     # Install trace function
