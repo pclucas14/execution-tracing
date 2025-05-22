@@ -46,7 +46,6 @@ def main():
     print(f"Tracing script: {script_to_trace}")
     print(f"Tracing scope: {scope_path}")
     start_tracing(scope_path=scope_path, main_file=script_to_trace)
-    # Execute the script
     try:
         # Add script directory to path to ensure imports work
         script_dir = os.path.dirname(script_to_trace)
