@@ -1,16 +1,16 @@
 # My Tracer
 
-A comprehensive Python function call tracer that provides detailed insights into function execution, including call hierarchies, timing, arguments, return values, and external calls.
+A comprehensive Python function call tracer that provides detailed insights into function execution with scope-based filtering, call hierarchies, argument logging, and external call detection.
 
 ## Features
 
-- **Function Call Tracing**: Track function calls with detailed timing information
-- **Call Hierarchy Visualization**: See the nested structure of function calls with indentation
-- **Argument and Return Value Logging**: Capture input arguments and return values
-- **External Call Detection**: Identify calls to functions outside the traced scope
-- **Flexible Configuration**: Customize tracing behavior with various options
-- **Multiple Output Formats**: Support for console output and file logging
-- **Performance Metrics**: Execution time tracking for performance analysis
+- **Scope-Based Tracing**: Restrict tracing to specific directories or projects
+- **Call Hierarchy Visualization**: See the nested structure of function calls with proper indentation
+- **Argument Logging**: Capture and intelligently format function arguments
+- **External Call Detection**: Identify and optionally track calls to functions outside the traced scope
+- **JSON Output**: Structured output format for easy parsing and analysis
+- **Configurable Filtering**: Control what gets traced and logged
+- **Command-Line Interface**: Easy-to-use script for tracing any Python program
 
 ## Installation
 
@@ -24,274 +24,252 @@ No additional dependencies required - uses only Python standard library.
 
 ## Quick Start
 
-Basic usage as a decorator:
+### Using the Command-Line Interface
+
+The easiest way to use the tracer is through the command-line interface:
+
+```bash
+# Basic usage - trace a script
+python examples/basic_trace.py your_script.py
+
+# With output file
+python examples/basic_trace.py your_script.py -o trace_output.json
+
+# With custom scope
+python examples/basic_trace.py your_script.py --scope /path/to/project
+
+# Disable external call tracking
+python examples/basic_trace.py your_script.py --no-external-calls
+```
+
+### Using the API Directly
 
 ```python
-from tracer import trace
+from src.tracer.core import start_tracing, stop_tracing
 
-@trace()
 def fibonacci(n):
     if n <= 1:
         return n
     return fibonacci(n-1) + fibonacci(n-2)
 
-result = fibonacci(5)
+# Start tracing
+start_tracing(scope_path="/path/to/your/project", track_external_calls=True)
+
+try:
+    result = fibonacci(5)
+finally:
+    # Stop tracing and get output
+    trace_output = stop_tracing("fibonacci_trace.json")
+    print("Tracing complete!")
 ```
 
 ## Configuration Options
 
-### Basic Parameters
+### Core Functions
 
-- **`depth`** (int, default: None): Maximum depth of function calls to trace
-- **`show_args`** (bool, default: True): Include function arguments in trace output
-- **`show_returns`** (bool, default: True): Include return values in trace output
-- **`track_external_calls`** (bool, default: True): Track calls to functions outside the traced scope
+#### `start_tracing(scope_path=None, main_file=None, track_external_calls=True)`
 
-### Output Control
+- **`scope_path`** (str, optional): Directory path to restrict tracing to
+- **`main_file`** (str, optional): Main file being traced (used for depth calculation)
+- **`track_external_calls`** (bool, default: True): Whether to log calls to functions outside the scope
 
-- **`output_file`** (str, default: None): File path to write trace output (None for console)
-- **`indent`** (str, default: "  "): String used for indenting nested calls
+#### `stop_tracing(output_file=None)`
+
+- **`output_file`** (str, optional): File path to write JSON trace output
+
+### Command-Line Options
+
+- **`--scope`**: Directory path to restrict tracing to
+- **`--no-external-calls`**: Disable tracking of external function calls
+- **`-o, --output`**: Output file for trace results
 
 ## Usage Examples
 
-### 1. Basic Function Tracing
+### 1. Basic Project Tracing
 
 ```python
-from tracer import trace
+from src.tracer.core import start_tracing, stop_tracing
 
-@trace()
 def add(a, b):
     return a + b
 
-@trace()
 def multiply(x, y):
     return x * y
 
-@trace()
 def calculate(a, b):
     sum_result = add(a, b)
     product = multiply(a, b)
     return sum_result, product
 
-result = calculate(3, 4)
+# Start tracing with scope
+start_tracing(scope_path="/home/user/my_project")
+
+try:
+    result = calculate(3, 4)
+finally:
+    output = stop_tracing("calculation_trace.json")
 ```
 
-Output:
-```
--> calculate(a=3, b=4)
-  -> add(a=3, b=4)
-  <- add() returned 7 (0.0001s)
-  -> multiply(x=3, y=4)
-  <- multiply() returned 12 (0.0001s)
-<- calculate() returned (7, 12) (0.0002s)
-```
-
-### 2. Limiting Trace Depth
-
-```python
-@trace(depth=2)
-def deep_function():
-    level1()
-
-def level1():
-    level2()
-
-def level2():
-    level3()
-
-def level3():
-    return "deep"
-
-deep_function()
+Example JSON output:
+```json
+[
+  {
+    "location": "example.py:15",
+    "parent_location": null,
+    "name": "calculate",
+    "arguments": {"a": 3, "b": 4},
+    "depth": 0,
+    "is_external": false
+  },
+  {
+    "location": "example.py:5",
+    "parent_location": "example.py:16",
+    "name": "add",
+    "arguments": {"a": 3, "b": 4},
+    "depth": 1,
+    "is_external": false
+  }
+]
 ```
 
-### 3. Hiding Arguments or Return Values
-
-```python
-@trace(show_args=False, show_returns=False)
-def process_sensitive_data(password, data):
-    # Function implementation
-    return processed_data
-
-# Output will show function names and timing only
-```
-
-### 4. Tracking External Calls
+### 2. Tracing with External Calls
 
 ```python
 import math
-import random
+import os
+from src.tracer.core import start_tracing, stop_tracing
 
-@trace(track_external_calls=True)
 def calculate_area(radius):
-    # This will show calls to math.pi and math.pow
-    area = math.pi * math.pow(radius, 2)
-    # This will show call to random.random
-    jitter = random.random() * 0.1
-    return area + jitter
+    # External call to math.pi - will be logged
+    area = math.pi * (radius ** 2)
+    # External call to os.getpid - will be logged
+    pid = os.getpid()
+    return area, pid
 
-calculate_area(5)
+start_tracing(scope_path="/path/to/project", track_external_calls=True)
+try:
+    result = calculate_area(5)
+finally:
+    stop_tracing("area_trace.json")
 ```
 
-Output:
-```
--> calculate_area(radius=5)
-  [EXTERNAL] math.pow(5, 2) -> 25.0
-  [EXTERNAL] random.random() -> 0.0423...
-<- calculate_area() returned 78.58... (0.0003s)
-```
-
-### 5. Disabling External Call Tracking
+### 3. Disabling External Call Tracking
 
 ```python
-@trace(track_external_calls=False)
+from src.tracer.core import start_tracing, stop_tracing
+
 def function_with_external_calls():
+    import json
     import os
-    return os.getcwd()
+    data = {"key": "value"}
+    # These external calls won't be logged
+    json_str = json.dumps(data)
+    cwd = os.getcwd()
+    return json_str, cwd
 
-# External calls to os.getcwd() won't be shown
+start_tracing(scope_path="/path/to/project", track_external_calls=False)
+try:
+    result = function_with_external_calls()
+finally:
+    stop_tracing("no_external_trace.json")
 ```
 
-### 6. File Output
+### 4. Command-Line Usage Examples
 
-```python
-@trace(output_file="trace_log.txt")
-def logged_function():
-    return "This trace goes to file"
+```bash
+# Trace a machine learning training script
+python examples/basic_trace.py train_model.py --scope /path/to/ml_project -o training_trace.json
 
-logged_function()
-# Check trace_log.txt for output
+# Trace with arguments passed to the target script
+python examples/basic_trace.py data_processor.py --input data.csv --output results.csv
+
+# Trace without external calls for cleaner output
+python examples/basic_trace.py web_scraper.py --no-external-calls -o clean_trace.json
 ```
 
-### 7. Custom Indentation
+### 5. Recursive Function Tracing
 
 ```python
-@trace(indent="    ")  # 4 spaces instead of 2
-def custom_indent_function():
-    nested_call()
+from src.tracer.core import start_tracing, stop_tracing
 
-def nested_call():
-    return "nested"
-
-custom_indent_function()
-```
-
-### 8. Complex Example with All Features
-
-```python
-import time
-import math
-
-@trace(
-    depth=3,
-    show_args=True,
-    show_returns=True,
-    track_external_calls=True,
-    output_file="complex_trace.log",
-    indent="  "
-)
-def complex_calculation(data):
-    """Complex function demonstrating all tracer features"""
-    processed = preprocess(data)
-    result = compute(processed)
-    return postprocess(result)
-
-def preprocess(data):
-    # Simulate some processing time
-    time.sleep(0.001)
-    return [x * 2 for x in data]
-
-def compute(data):
-    total = sum(data)
-    # External call to math
-    sqrt_total = math.sqrt(total)
-    return sqrt_total
-
-def postprocess(value):
-    return round(value, 2)
-
-result = complex_calculation([1, 2, 3, 4, 5])
-```
-
-## Context Manager Usage
-
-You can also use the tracer as a context manager for more control:
-
-```python
-from tracer import TracingContext
-
-def my_function():
-    return "traced"
-
-def another_function():
-    return my_function()
-
-# Trace specific code blocks
-with TracingContext(show_args=True, show_returns=True):
-    result = another_function()
-```
-
-## Advanced Features
-
-### Performance Analysis
-
-The tracer automatically tracks execution time for each function call, making it useful for performance analysis:
-
-```python
-@trace()
-def slow_function():
-    import time
-    time.sleep(0.1)
-    return "done"
-
-# Output will show: <- slow_function() returned 'done' (0.1001s)
-```
-
-### Recursive Function Tracing
-
-The tracer handles recursive functions gracefully:
-
-```python
-@trace(depth=5)
 def factorial(n):
     if n <= 1:
         return 1
     return n * factorial(n - 1)
 
-factorial(4)
-```
-
-### Error Handling
-
-The tracer captures and reports exceptions:
-
-```python
-@trace()
-def error_function():
-    raise ValueError("Something went wrong")
-
+start_tracing(scope_path="/path/to/project")
 try:
-    error_function()
-except ValueError:
-    pass  # Error will be shown in trace output
+    result = factorial(5)
+finally:
+    stop_tracing("factorial_trace.json")
 ```
+
+## Output Format
+
+The tracer outputs JSON with the following structure for each function call:
+
+```json
+{
+  "location": "filename.py:line_number",
+  "parent_location": "caller_file.py:caller_line",
+  "name": "function_name",
+  "arguments": {
+    "param1": "value1",
+    "param2": "value2"
+  },
+  "depth": 0,
+  "is_external": false
+}
+```
+
+### Field Descriptions
+
+- **`location`**: Where the function is defined
+- **`parent_location`**: Where the function was called from
+- **`name`**: Function name
+- **`arguments`**: Function arguments (intelligently formatted)
+- **`depth`**: Nesting depth within the traced scope
+- **`is_external`**: Whether the function is outside the traced scope
+
+## Advanced Features
+
+### Intelligent Argument Formatting
+
+The tracer intelligently formats function arguments:
+
+- Large strings are truncated with "..."
+- Large collections show count instead of full contents
+- Complex objects show type name
+- Nested structures are handled recursively
+
+### Scope Detection
+
+For projects with recognizable structures (like MTTL), the tracer can automatically detect the appropriate scope:
+
+```bash
+# Will automatically detect and use the 'mttl' directory as scope
+python examples/basic_trace.py /path/to/mttl/experiments/train.py
+```
+
+### Threading Support
+
+The tracer attempts to trace function calls in threads when possible.
 
 ## Best Practices
 
-1. **Use appropriate depth limits** for recursive or deeply nested functions
-2. **Disable argument/return logging** for functions with sensitive data
-3. **Use file output** for long traces to avoid cluttering console
-4. **Disable external call tracking** if you only want to see your own functions
-5. **Consider performance impact** - tracing adds overhead, so disable in production
+1. **Set appropriate scope**: Use `--scope` to limit tracing to your project directory
+2. **Disable external calls for cleaner output**: Use `--no-external-calls` when you only care about your own functions
+3. **Use file output for large traces**: Always specify an output file for non-trivial programs
+4. **Consider performance impact**: Tracing adds overhead, so use judiciously in performance-critical code
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Too much output**: Use `depth` parameter to limit trace depth
-2. **Sensitive data in logs**: Set `show_args=False` and `show_returns=False`
-3. **Performance impact**: Tracing adds overhead; use selectively
-4. **File permissions**: Ensure write permissions for output file location
+1. **Too much output**: Use `--scope` to limit tracing to your project directory
+2. **Performance impact**: Disable external call tracking or use more restrictive scoping
+3. **File permissions**: Ensure write permissions for output file location
+4. **Import errors**: Make sure the tracer's `src` directory is in your Python path
 
 ### Performance Considerations
 
@@ -300,21 +278,18 @@ except ValueError:
 - File output is generally faster than console output for large traces
 - Consider using conditional tracing in production environments
 
-## API Reference
+## Testing
 
-### `trace()` Decorator
+Run the test suite:
 
-```python
-def trace(depth=None, show_args=True, show_returns=True, 
-          track_external_calls=True, output_file=None, indent="  ")
+```bash
+python -m pytest tests/
 ```
 
-### `TracingContext` Context Manager
+Or run individual test files:
 
-```python
-class TracingContext:
-    def __init__(self, depth=None, show_args=True, show_returns=True,
-                 track_external_calls=True, output_file=None, indent="  ")
+```bash
+python tests/test_tracer.py
 ```
 
 ## Contributing
@@ -332,7 +307,8 @@ class TracingContext:
 ## Changelog
 
 ### Version 1.0.0
-- Initial release with basic tracing functionality
-- Support for depth limiting, argument/return value logging
-- External call tracking
-- File and console output options
+- Initial release with scope-based tracing
+- JSON output format
+- External call detection and filtering
+- Command-line interface
+- Intelligent argument formatting
