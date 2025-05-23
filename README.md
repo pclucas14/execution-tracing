@@ -84,56 +84,9 @@ finally:
 - **`--no-external-calls`**: Disable tracking of external function calls
 - **`-o, --output`**: Output file for trace results
 
-## Usage Examples
+## Other Usage Examples
 
-### 1. Basic Project Tracing
-
-```python
-from src.tracer.core import start_tracing, stop_tracing
-
-def add(a, b):
-    return a + b
-
-def multiply(x, y):
-    return x * y
-
-def calculate(a, b):
-    sum_result = add(a, b)
-    product = multiply(a, b)
-    return sum_result, product
-
-# Start tracing with scope
-start_tracing(scope_path="/home/user/my_project")
-
-try:
-    result = calculate(3, 4)
-finally:
-    output = stop_tracing("calculation_trace.json")
-```
-
-Example JSON output:
-```json
-[
-  {
-    "location": "example.py:15",
-    "parent_location": null,
-    "name": "calculate",
-    "arguments": {"a": 3, "b": 4},
-    "depth": 0,
-    "is_external": false
-  },
-  {
-    "location": "example.py:5",
-    "parent_location": "example.py:16",
-    "name": "add",
-    "arguments": {"a": 3, "b": 4},
-    "depth": 1,
-    "is_external": false
-  }
-]
-```
-
-### 2. Tracing with External Calls
+### 1. Tracing with External Calls
 
 ```python
 import math
@@ -154,7 +107,7 @@ finally:
     stop_tracing("area_trace.json")
 ```
 
-### 3. Disabling External Call Tracking
+### 2. Disabling External Call Tracking
 
 ```python
 from src.tracer.core import start_tracing, stop_tracing
@@ -175,7 +128,7 @@ finally:
     stop_tracing("no_external_trace.json")
 ```
 
-### 4. Command-Line Usage Examples
+### 3. Command-Line Usage Examples
 
 ```bash
 # Trace a machine learning training script
@@ -188,7 +141,7 @@ python examples/basic_trace.py data_processor.py --input data.csv --output resul
 python examples/basic_trace.py web_scraper.py --no-external-calls -o clean_trace.json
 ```
 
-### 5. Recursive Function Tracing
+### 4. Recursive Function Tracing
 
 ```python
 from src.tracer.core import start_tracing, stop_tracing
@@ -242,35 +195,6 @@ The tracer intelligently formats function arguments:
 - Large collections show count instead of full contents
 - Complex objects show type name
 - Nested structures are handled recursively
-
-### Scope Detection
-
-For projects with recognizable structures (like MTTL), the tracer can automatically detect the appropriate scope:
-
-```bash
-# Will automatically detect and use the 'mttl' directory as scope
-python examples/basic_trace.py /path/to/mttl/experiments/train.py
-```
-
-### Threading Support
-
-The tracer attempts to trace function calls in threads when possible.
-
-## Best Practices
-
-1. **Set appropriate scope**: Use `--scope` to limit tracing to your project directory
-2. **Disable external calls for cleaner output**: Use `--no-external-calls` when you only care about your own functions
-3. **Use file output for large traces**: Always specify an output file for non-trivial programs
-4. **Consider performance impact**: Tracing adds overhead, so use judiciously in performance-critical code
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Too much output**: Use `--scope` to limit tracing to your project directory
-2. **Performance impact**: Disable external call tracking or use more restrictive scoping
-3. **File permissions**: Ensure write permissions for output file location
-4. **Import errors**: Make sure the tracer's `src` directory is in your Python path
 
 ### Performance Considerations
 
