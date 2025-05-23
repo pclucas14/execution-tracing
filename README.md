@@ -45,6 +45,7 @@ python examples/basic_trace.py your_script.py --no-external-calls
 ### Using the API Directly
 
 ```python
+import os
 from src.tracer.core import start_tracing, stop_tracing
 
 def fibonacci(n):
@@ -53,7 +54,7 @@ def fibonacci(n):
     return fibonacci(n-1) + fibonacci(n-2)
 
 # Start tracing
-start_tracing(scope_path="/path/to/your/project", track_external_calls=True)
+start_tracing(scope_path=os.getcwd(), track_external_calls=True)
 
 try:
     result = fibonacci(5)
