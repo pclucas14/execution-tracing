@@ -18,7 +18,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "tracer=cli.main:main",  # Assuming main function in cli/main.py
+            "tracer=cli.main:main",
         ],
     },
     classifiers=[
