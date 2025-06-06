@@ -1,5 +1,48 @@
 #!/bin/bash
 
+echo "Starting visualization server on port $2..."
+echo "Trace file: $1"
+
+python3 << EOF
+try:
+    import sys
+    import os
+    sys.path.insert(0, '/home/lpagecaccia/my_tracer')
+    
+    def visualize_trace(trace_file, port):
+        # Read and process the trace file
+        with open(trace_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Replace all variations of Unicode box-drawing characters
+        # Using the exact characters that appear in the output
+        replacements = [
+            ('â""â"€', '    '),  # └─
+            ('â"œâ"€', '    '),  # ├─
+            ('â"‚  ', '    '),  # │ (with spaces)
+            ('â"‚ ', '   '),     # │ (with space)
+            ('Ã—', 'x'),        # ×
+        ]
+        
+        for old, new in replacements:
+            content = content.replace(old, new)
+        
+        print("\nProcessed trace output:")
+        print("-" * 80)
+        print(content)
+        print("-" * 80)
+        
+        # If you want to serve it via HTTP, add that code here
+    
+    visualize_trace("$1", $2)
+    
+except Exception as e:
+    print(f"Error visualizing trace: {e}")
+    import traceback
+    traceback.print_exc()
+EOF
+#!/bin/bash
+
 # Serve trace visualization for remote viewing
 # Usage: ./serve_visualization.sh trace_file.json [port]
 
