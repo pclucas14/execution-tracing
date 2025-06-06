@@ -66,9 +66,12 @@ class Tracer:
             "location": location,
             "parent_location": parent_location,
             "name": function_name,
-            "arguments": formatted_args,
+            "arguments": formatted_args,  # This is what the HTML visualizer looks for
             "depth": depth,
-            "is_external": is_external
+            "is_external": is_external,
+            # Also add args/kwargs for compatibility with pattern grouping
+            "args": {},  # Could separate positional args here if needed
+            "kwargs": formatted_args  # For now, treat all as keyword args
         }
         self.log.append(entry)
     
