@@ -19,9 +19,6 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
     else:
         grouped_data = trace_data
     
-    # Create visualizer
-    visualizer = TraceVisualizer(trace_data if not group_patterns else [])
-    
     # Generate summary for original data
     if isinstance(trace_data, list):
         summary_output = _generate_summary_stats(trace_data)
@@ -154,6 +151,11 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             padding: 2px 4px;
             border-radius: 3px;
         }}
+        .import-call {{
+            color: #999;
+            background-color: #f5f5f5;
+            font-style: italic;
+        }}
         .filter-controls {{
             margin-bottom: 15px;
             background: #f8f9fa;
@@ -188,6 +190,10 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             <label>
                 <input type="checkbox" id="showExternal" checked onchange="toggleExternal()">
                 Show external calls
+            </label>
+            <label>
+                <input type="checkbox" id="showImports" onchange="toggleImports()">
+                Show import calls
             </label>
             <label>
                 <input type="checkbox" id="expandPatterns" checked onchange="togglePatterns()">
@@ -256,7 +262,37 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             const showExternal = document.getElementById('showExternal').checked;
             const externalElements = document.querySelectorAll('.external');
             externalElements.forEach(el => {{
-                el.style.display = showExternal ? 'block' : 'none';
+                const argsDiv = el.nextElementSibling;
+                if (showExternal) {{
+                    el.style.display = 'block';
+                    if (argsDiv && argsDiv.classList.contains('args-container')) {{
+                        argsDiv.style.display = el.classList.contains('expanded') ? 'block' : 'none';
+                    }}
+                }} else {{
+                    el.style.display = 'none';
+                    if (argsDiv && argsDiv.classList.contains('args-container')) {{
+                        argsDiv.style.display = 'none';
+                    }}
+                }}
+            }});
+        }}
+        
+        function toggleImports() {{
+            const showImports = document.getElementById('showImports').checked;
+            const importElements = document.querySelectorAll('.import-call');
+            importElements.forEach(el => {{
+                const argsDiv = el.nextElementSibling;
+                if (showImports) {{
+                    el.style.display = 'block';
+                    if (argsDiv && argsDiv.classList.contains('args-container')) {{
+                        argsDiv.style.display = el.classList.contains('expanded') ? 'block' : 'none';
+                    }}
+                }} else {{
+                    el.style.display = 'none';
+                    if (argsDiv && argsDiv.classList.contains('args-container')) {{
+                        argsDiv.style.display = 'none';
+                    }}
+                }}
             }});
         }}
         
@@ -278,6 +314,11 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             const toggle = element.querySelector('.pattern-toggle');
             toggle.textContent = content.classList.contains('collapsed') ? '▶' : '▼';
         }}
+        
+        // Initialize - hide imports by default
+        document.addEventListener('DOMContentLoaded', function() {{
+            toggleImports();
+        }});
     </script>
 </body>
 </html>
@@ -352,11 +393,26 @@ def _format_pattern_group(pattern_group: Dict[str, Any], original_trace_data: Li
     </div>
 </div>"""
 
+def _is_import_call(call: Dict[str, Any]) -> bool:
+    """Check if a call is related to module importing."""
+    name = call.get('name', '')
+    location = call.get('location', '')
+    parent_location = call.get('parent_location', '')
+    
+    # Check for common import patterns
+    return (
+        '<frozen importlib._bootstrap>' in parent_location or
+        '<frozen importlib._bootstrap>' in location or
+        name == '<module>' or
+        'importlib' in location
+    )
+
 def _format_single_call(call: Dict[str, Any], original_trace_data: List[Dict[str, Any]], index: int, depth: int) -> str:
     """Format a single call as HTML with clickable arguments."""
     name = call.get('name', 'unknown')
     location = call.get('location', 'unknown')
     is_external = call.get('is_external', False)
+    is_import = _is_import_call(call)
     
     # Find the original trace entry to get full argument data
     original_entry = None
@@ -374,6 +430,8 @@ def _format_single_call(call: Dict[str, Any], original_trace_data: List[Dict[str
     css_classes = "call-entry"
     if is_external:
         css_classes += " external"
+    if is_import:
+        css_classes += " import-call"
     
     indent = "  " * depth
     call_id = f"call_{index}_{hash(str(call))}"
@@ -427,7 +485,7 @@ def _format_arguments_html(arguments: dict) -> str:
             if len(value) == 0:
                 formatted_value = '{}'
             elif len(value) > 3:
-                formatted_value = f'{{{len(value)} keys}}'
+                formatted_value = f'{{{len(value)} keys}}';
             else:
                 formatted_value = str(value)
             value_type = 'dict'

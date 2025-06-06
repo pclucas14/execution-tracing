@@ -1,24 +1,27 @@
 #!/bin/bash
 
 # Serve trace visualization for remote viewing with pattern grouping
-# Usage: ./serve_visualization.sh trace_file.json [port] [--no-patterns]
+# Usage: ./serve_visualization.sh trace_file.json [port] [--no-patterns] [--hide-imports]
 
 TRACE_FILE=$1
 PORT=${2:-8080}
 GROUP_PATTERNS=True
+HIDE_IMPORTS=False
 
-# Check for --no-patterns flag
+# Check for flags
 for arg in "$@"; do
     if [ "$arg" = "--no-patterns" ]; then
-        GROUP_PATTERNS=false
-        break
+        GROUP_PATTERNS=False
+    elif [ "$arg" = "--hide-imports" ]; then
+        HIDE_IMPORTS=true
     fi
 done
 
 if [ -z "$TRACE_FILE" ]; then
-    echo "Usage: $0 <trace_file.json> [port] [--no-patterns]"
+    echo "Usage: $0 <trace_file.json> [port] [--no-patterns] [--hide-imports]"
     echo "Default port is 8080"
     echo "Use --no-patterns to disable pattern grouping"
+    echo "Use --hide-imports to hide import-related calls by default"
     exit 1
 fi
 
@@ -37,6 +40,7 @@ export PYTHONPATH="$PROJECT_ROOT/src:$PROJECT_ROOT:$PYTHONPATH"
 echo "Starting visualization server on port $PORT..."
 echo "Trace file: $TRACE_FILE"
 echo "Pattern grouping: $GROUP_PATTERNS"
+echo "Hide imports: $HIDE_IMPORTS"
 
 python3 << EOF
 import sys
@@ -85,6 +89,7 @@ def clean_and_visualize_trace(trace_file, port, group_patterns):
             print(f"\n🌐 Then open in browser: http://localhost:{port}/{filename}")
             print(f"\n📊 Features enabled:")
             print(f"   • Pattern grouping: {'✓' if group_patterns else '✗'}")
+            print(f"   • Import filtering: {'✓' if $HIDE_IMPORTS else '✗'}")
             print(f"   • Interactive filtering: ✓")
             print(f"   • Nested pattern detection: ✓")
             print("\nPress Ctrl+C to stop the server...")
