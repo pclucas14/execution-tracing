@@ -32,49 +32,6 @@ trace_program <script_to_trace.py> [script_arguments...]
 - `--no-external-calls` - Disable tracking of calls to functions outside the scope
 - `script_args` - Arguments to pass to the traced script (supports both positional and named arguments)
 
-### Examples
-
-#### Basic tracing (output to stdout)
-```bash
-python -m cli.main my_script.py
-# or
-trace_program my_script.py
-```
-
-#### Trace with output file
-```bash
-python -m cli.main my_script.py -o trace_results.json
-# or  
-trace_program my_script.py -o trace_results.json
-```
-
-#### Trace with custom scope
-```bash
-python -m cli.main my_script.py --scope /path/to/project
-# or
-trace_program my_script.py --scope /path/to/project
-```
-
-#### Trace without external calls
-```bash
-python -m cli.main my_script.py --no-external-calls
-# or
-trace_program my_script.py --no-external-calls
-```
-
-#### Trace script with arguments
-```bash
-python -m cli.main my_script.py arg1 arg2 --script-flag=value
-# or
-trace_program my_script.py arg1 arg2 --script-flag=value
-```
-
-#### Combined options
-```bash
-python -m cli.main my_script.py -o results.json --scope /project/src arg1 arg2
-# or
-trace_program my_script.py -o results.json --scope /project/src arg1 arg2
-```
 
 ## Visualization
 
@@ -108,21 +65,6 @@ bash scripts/serve_visualization.sh trace_output.json 8080 --hide-imports
     └── 🔄 Nested Pattern: 2x repetitions of 2 calls
         ├── forward [train_lens.py:88]
         └── layer_name [base.py:21]
-```
-
-## Scope Detection
-
-The tracer automatically determines the scope for tracing:
-
-1. If `--scope` is specified, uses that path
-2. If no scope is specified, defaults to the directory containing the script
-3. **MTTL Project Detection**: If the script path contains 'mttl', automatically sets scope to the mttl directory root
-
-### MTTL Project Example
-```bash
-# For a script at /path/to/mttl/experiments/train.py
-# Automatically sets scope to /path/to/mttl/
-python -m cli.main /path/to/mttl/experiments/train.py --config config.yaml
 ```
 
 ## Output

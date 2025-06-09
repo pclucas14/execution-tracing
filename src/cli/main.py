@@ -32,15 +32,12 @@ def main():
     scope_path = args.scope
     if not scope_path:
         # Default to the directory containing the script
+        print(f'No scope specified, using directory of the script: {script_to_trace}')
         scope_path = os.path.dirname(script_to_trace)
-        
-    # For MTTL project structure, try to detect the mttl directory
-    if 'mttl' in script_to_trace:
-        mttl_index = script_to_trace.find('mttl')
-        if mttl_index > 0:
-            # Use the mttl directory as scope
-            scope_path = os.path.abspath(script_to_trace[:mttl_index+4])
-            print(f"Detected MTTL project, setting scope to: {scope_path}")
+    else:
+        # Resolve the scope path to an absolute path
+        scope_path = os.path.abspath(scope_path)
+        print(f'Scope path set to: {scope_path}')
 
     # Start tracing
     print(f"Tracing script: {script_to_trace}")
