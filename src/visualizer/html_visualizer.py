@@ -137,22 +137,22 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             color: #008000;
         }}
         .arg-type {{
-            color: #666;
+            color: #333;
             font-style: italic;
             font-size: 0.9em;
         }}
         .no-args {{
-            color: #666;
+            color: #333;
             font-style: italic;
         }}
         .external {{
-            color: #888;
+            color: #555;
             background-color: #fff3cd;
             padding: 2px 4px;
             border-radius: 3px;
         }}
         .import-call {{
-            color: #999;
+            color: #444;
             background-color: #f5f5f5;
             font-style: italic;
         }}
