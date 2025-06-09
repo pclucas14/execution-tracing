@@ -144,5 +144,111 @@ class TestTracer(unittest.TestCase):
         self.assertTrue(tracer_enabled.track_external_calls)
         self.assertFalse(tracer_disabled.track_external_calls)
 
+    def test_argument_structure_for_visualization(self):
+        """Test that arguments are structured properly for the HTML visualization."""
+        self.tracer.start()
+        
+        # Test with mixed argument types
+        test_args = {'self': 'TunedLensConfig object', 'skip_fields': []}
+        
+        self.tracer.log_function_call('test_function', test_args)
+        
+        logged_call = self.tracer.log[0]
+        
+        # Verify that arguments are accessible for click functionality
+        self.assertIn('arguments', logged_call)
+        self.assertIsInstance(logged_call['arguments'], dict)
+        
+        # Test that all arguments are present
+        all_args = logged_call['arguments']
+        self.assertEqual(all_args['self'], 'TunedLensConfig object')
+        self.assertEqual(all_args['skip_fields'], [])
+
+    def test_complex_argument_types(self):
+        """Test that complex argument types are handled properly for visualization."""
+        self.tracer.start()
+        
+        # Create complex arguments similar to what we see in actual traces
+        complex_args = {
+            'self': 'TunedLensConfig object',
+            'skip_fields': [],
+            'long_string': 'x' * 150,  # Will be truncated to 100 chars + "..."
+            'nested_dict': {'level1': {'level2': 'value'}},
+            'large_list': list(range(20)),  # Should show count
+            'none_value': None,
+            'boolean_value': True,
+            'float_value': 3.14159
+        }
+        
+        self.tracer.log_function_call('complex_function', complex_args)
+        logged_call = self.tracer.log[0]
+        
+        args = logged_call['arguments']
+        
+        # Test that all arguments are present and properly formatted
+        self.assertEqual(args['self'], 'TunedLensConfig object')
+        self.assertEqual(args['skip_fields'], [])
+        # Long strings are truncated at 100 chars + "..."
+        self.assertEqual(len(args['long_string']), 103)  # 100 chars + "..."
+        self.assertTrue(args['long_string'].endswith('...'))
+        # Large lists show count description
+        self.assertEqual(args['large_list'], "list with 20 items")
+        # Nested dict should be formatted properly
+        self.assertEqual(args['nested_dict'], {'level1': {'level2': 'value'}})
+        self.assertIsNone(args['none_value'])
+        self.assertEqual(args['boolean_value'], True)
+        self.assertEqual(args['float_value'], 3.14159)
+
+    def test_argument_click_data_structure(self):
+        """Test that the data structure supports the click functionality."""
+        self.tracer.start()
+        
+        # Create arguments exactly like we see in real traces
+        test_args = {
+            'self': 'TunedLensConfig object',
+            'skip_fields': []
+        }
+        
+        self.tracer.log_function_call('__init__', test_args, 
+                                    '/test/file.py', 123, None, 0, False)
+        
+        logged_call = self.tracer.log[0]
+        
+        # Verify structure matches what HTML visualizer expects
+        self.assertIn('name', logged_call)
+        self.assertIn('arguments', logged_call)
+        self.assertIn('location', logged_call)
+        self.assertIn('depth', logged_call)
+        
+        # Test that arguments are properly structured for display
+        arguments = logged_call['arguments']
+        self.assertEqual(arguments['self'], 'TunedLensConfig object')
+        self.assertEqual(arguments['skip_fields'], [])
+
+    def test_backward_compatibility_with_args_kwargs(self):
+        """Test backward compatibility when args/kwargs structure is used."""
+        import json
+        
+        # Simulate trace data with the new args/kwargs structure
+        trace_data = [{
+            'name': 'test_function',
+            'location': 'test.py:10',
+            'args': {'pos1': 'value1', 'pos2': 42},
+            'kwargs': {'kw1': 'kwvalue1', 'kw2': [1, 2, 3]},
+            'depth': 0,
+            'is_external': False
+        }]
+        
+        # Verify JSON serialization works
+        json_output = json.dumps(trace_data, default=str)
+        parsed = json.loads(json_output)
+        
+        self.assertEqual(len(parsed), 1)
+        entry = parsed[0]
+        self.assertIn('args', entry)
+        self.assertIn('kwargs', entry)
+        self.assertEqual(entry['args']['pos1'], 'value1')
+        self.assertEqual(entry['kwargs']['kw1'], 'kwvalue1')
+
 if __name__ == '__main__':
     unittest.main()

@@ -125,7 +125,7 @@ class Tracer:
             # Handle strings
             if isinstance(value, str):
                 if len(value) > 100:
-                    return f"{value[:97]}..."
+                    return f"{value[:100]}..."  # 100 chars + "..." = 103 total
                 return value
                 
             # Handle numbers and booleans

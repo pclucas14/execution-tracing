@@ -1,6 +1,7 @@
 import sys
 import os
 import argparse
+from tracer.core import start_tracing, stop_tracing
 
 def main():
     # Set up argument parser
@@ -15,7 +16,7 @@ def main():
     args, unknown = parser.parse_known_args()
     
     # Import tracer modules
-    from tracer.core import start_tracing, stop_tracing, set_tracer_scope
+    from tracer.core import set_tracer_scope
 
     if not args.script:
         print("Usage: trace_program <script_to_trace.py> [args...]")
@@ -60,6 +61,25 @@ def main():
     finally:
         # Stop tracing and output results
         stop_tracing(args.output)
+
+def run_tracer(args):
+    """Run the tracer with the given arguments."""
+    from tracer.core import start_tracing, stop_tracing
+    
+    # Start tracing with the provided arguments
+    start_tracing(
+        scope_path=getattr(args, 'scope_path', None),
+        main_file=getattr(args, 'main_file', None),
+        track_external_calls=getattr(args, 'track_external_calls', True)
+    )
+    
+    # Execute the target script/module
+    if hasattr(args, 'target') and args.target:
+        exec(open(args.target).read())
+    
+    # Stop tracing and save output
+    output_file = getattr(args, 'output_file', None)
+    return stop_tracing(output_file)
 
 if __name__ == "__main__":
     main()

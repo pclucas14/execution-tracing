@@ -102,12 +102,17 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             cursor: pointer;
             border-radius: 3px;
             transition: background-color 0.2s;
+            color: #222;
         }}
         .call-entry:hover {{
             background-color: #e8f4f8;
         }}
         .call-entry.expanded {{
             background-color: #d4edda;
+        }}
+        .call-entry strong {{
+            color: #000;
+            font-weight: bold;
         }}
         .args-container {{
             display: none;
