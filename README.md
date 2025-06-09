@@ -1,165 +1,102 @@
-# My Tracer
+# Python Execution Tracer
 
-A comprehensive Python function call tracer that provides detailed insights into function execution with scope-based filtering, call hierarchies, argument logging, and external call detection.
-
-## Features
-
-- **Scope-Based Tracing**: Restrict tracing to specific directories or projects
-- **Call Hierarchy Visualization**: See the nested structure of function calls with proper indentation
-- **Argument Logging**: Capture and intelligently format function arguments
-- **External Call Detection**: Identify and optionally track calls to functions outside the traced scope
-- **JSON Output**: Structured output format for easy parsing and analysis
-- **Configurable Filtering**: Control what gets traced and logged
-- **Command-Line Interface**: Easy-to-use script for tracing any Python program
+A Python program execution tracer that tracks function calls, method invocations, and execution flow within specified scopes.
 
 ## Installation
 
-Clone the repository:
 ```bash
-git clone <repository-url>
-cd my_tracer
+pip install -e .
 ```
 
-No additional dependencies required - uses only Python standard library.
+## Usage
 
-## Quick Start
+### Basic Usage
 
-### Using the Command-Line Interface
+There are two ways to run the tracer:
 
-The easiest way to use the tracer is through the command-line interface:
-
+#### Using the Python module
 ```bash
-# Basic usage - trace a script
-python examples/basic_trace.py your_script.py
-
-# With output file
-python examples/basic_trace.py your_script.py -o trace_output.json
-
-# With custom scope
-python examples/basic_trace.py your_script.py --scope /path/to/project
-
-# Disable external call tracking
-python examples/basic_trace.py your_script.py --no-external-calls
+python -m cli.main <script_to_trace.py> [script_arguments...]
 ```
 
-### Using the API Directly
-
-```python
-import os
-from src.tracer.core import start_tracing, stop_tracing
-
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
-
-# Start tracing
-start_tracing(scope_path=os.getcwd(), track_external_calls=True)
-
-try:
-    result = fibonacci(5)
-finally:
-    # Stop tracing and get output
-    trace_output = stop_tracing("fibonacci_trace.json")
-    print("Tracing complete!")
+#### Using the installed console script (after running `pip install -e .`)
+```bash
+trace_program <script_to_trace.py> [script_arguments...]
 ```
 
-## Configuration Options
+### Command Line Options
 
-### Core Functions
+- `script` - The Python script to trace (required)
+- `-o, --output` - Output file for trace results (optional, prints to stdout if not specified)
+- `--scope` - Directory path to restrict tracing to (optional, defaults to script directory)
+- `--no-external-calls` - Disable tracking of calls to functions outside the scope
+- `script_args` - Arguments to pass to the traced script (supports both positional and named arguments)
 
-#### `start_tracing(scope_path=None, main_file=None, track_external_calls=True)`
 
-- **`scope_path`** (str, optional): Directory path to restrict tracing to
-- **`main_file`** (str, optional): Main file being traced (used for depth calculation)
-- **`track_external_calls`** (bool, default: True): Whether to log calls to functions outside the scope
+## Visualization
 
-#### `stop_tracing(output_file=None)`
+<p align="center">
+  <img width="600" src="https://github.com/user-attachments/assets/68ae8de3-f88c-4fdb-b3fb-4c18673dcc7f" alt="Screenshot" />
+</p>
 
-- **`output_file`** (str, optional): File path to write JSON trace output
+### Pattern Grouping Visualization
 
-### Command-Line Options
-
-- **`--scope`**: Directory path to restrict tracing to
-- **`--no-external-calls`**: Disable tracking of external function calls
-- **`-o, --output`**: Output file for trace results
-
-## Output Format
-
-The tracer outputs JSON with the following structure for each function call:
-
-```json
-{
-  "location": "filename.py:line_number",
-  "parent_location": "caller_file.py:caller_line",
-  "name": "function_name",
-  "arguments": {
-    "param1": "value1",
-    "param2": "value2"
-  },
-  "depth": 0,
-  "is_external": false
-}
-```
-
-### Field Descriptions
-
-- **`location`**: Where the function is defined
-- **`parent_location`**: Where the function was called from
-- **`name`**: Function name
-- **`arguments`**: Function arguments (intelligently formatted)
-- **`depth`**: Nesting depth within the traced scope
-- **`is_external`**: Whether the function is outside the traced scope
-
-## Advanced Features
-
-### Intelligent Argument Formatting
-
-The tracer intelligently formats function arguments:
-
-- Large strings are truncated with "..."
-- Large collections show count instead of full contents
-- Complex objects show type name
-- Nested structures are handled recursively
-
-### Performance Considerations
-
-- Tracing adds overhead to function calls
-- External call tracking has additional overhead
-- File output is generally faster than console output for large traces
-- Consider using conditional tracing in production environments
-
-## Testing
-
-Run the test suite:
+The tracer includes advanced pattern detection that automatically groups repeating sequences of function calls. After generating a trace file, you can create an interactive HTML visualization:
 
 ```bash
-python -m pytest tests/
+# Serve visualization with pattern grouping (default)
+bash scripts/serve_visualization.sh trace_output.json 8080
+
+# Serve without pattern grouping  
+bash scripts/serve_visualization.sh trace_output.json 8080 --no-patterns
+
+# Hide import calls by default
+bash scripts/serve_visualization.sh trace_output.json 8080 --hide-imports
 ```
 
-Or run individual test files:
+**Pattern Detection Features:**
+- **Nested Patterns**: Detects patterns within patterns (e.g., repeated subsequences within larger repeated blocks)
+- **Visual Grouping**: Shows repeated call sequences in collapsible boxes with repetition counts
+- **Interactive Controls**: Toggle pattern expansion/collapse and filter external calls
+- **Statistics**: Displays pattern statistics and call counts
+
+**Example Pattern Detection:**
+```
+🔄 Repeating Pattern: 6x repetitions of 6 calls (calls #22388-#22423, total: 36 calls)
+  📋 Pattern template (repeated 6 times):
+    ├── scaled_dot_product_attention [packed_attention_monkey_patch.py:14]
+    ├── get [expert_context.py:25]  
+    └── 🔄 Nested Pattern: 2x repetitions of 2 calls
+        ├── forward [train_lens.py:88]
+        └── layer_name [base.py:21]
+```
+
+## Output
+
+The tracer generates execution traces that include:
+- Function and method calls with arguments
+- Call hierarchy and timing information
+- Scope-filtered execution paths
+- Optional external call tracking
+- **Pattern-grouped visualization** with nested repetition detection
+
+**Output Formats:**
+- **JSON**: When using `-o filename.json`, saves structured trace data
+- **Console**: When no output file is specified, prints formatted trace to stdout
+- **HTML Visualization**: Generated using the visualization scripts from JSON trace files
+
+Output can be saved to a file using the `-o` option, or printed to stdout if no output file is specified.
+
+### Remote Visualization
+
+For remote servers, use SSH port forwarding to view visualizations locally:
 
 ```bash
-python tests/test_tracer.py
+# On remote server
+bash scripts/serve_visualization.sh trace.json 8080
+
+# On local machine  
+ssh -L 8080:localhost:8080 user@remote-server
+
+# Then open http://localhost:8080/[filename].html in your browser
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-[Add your license information here]
-
-## Changelog
-
-### Version 1.0.0
-- Initial release with scope-based tracing
-- JSON output format
-- External call detection and filtering
-- Command-line interface
-- Intelligent argument formatting
