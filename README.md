@@ -35,6 +35,10 @@ trace_program <script_to_trace.py> [script_arguments...]
 
 ## Visualization
 
+<p align="center">
+  <img width="600" src="https://github.com/user-attachments/assets/68ae8de3-f88c-4fdb-b3fb-4c18673dcc7f" alt="Screenshot" />
+</p>
+
 ### Pattern Grouping Visualization
 
 The tracer includes advanced pattern detection that automatically groups repeating sequences of function calls. After generating a trace file, you can create an interactive HTML visualization:
