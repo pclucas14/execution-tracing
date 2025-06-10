@@ -365,6 +365,10 @@ def _generate_summary_stats(trace_data: List[Dict[str, Any]], metadata: Dict[str
     external_calls = sum(1 for call in trace_data if call.get('is_external', False))
     internal_calls = total_calls - external_calls
     
+    # Count import vs non-import calls using the same logic as the filter
+    import_calls = sum(1 for call in trace_data if _is_import_call(call))
+    non_import_calls = total_calls - import_calls
+    
     unique_functions = len(set(call.get('name', 'unknown') for call in trace_data))
     unique_locations = len(set(call.get('location', 'unknown') for call in trace_data))
     
@@ -390,6 +394,8 @@ def _generate_summary_stats(trace_data: List[Dict[str, Any]], metadata: Dict[str
 Total function calls: {total_calls:,}
 Internal calls: {internal_calls:,}
 External calls: {external_calls:,}
+Import calls: {import_calls:,}
+Non-import calls: {non_import_calls:,}
 Unique functions: {unique_functions:,}
 Unique locations: {unique_locations:,}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━""")

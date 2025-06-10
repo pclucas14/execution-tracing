@@ -11,6 +11,8 @@ def main():
     parser.add_argument('--scope', help='Directory path to restrict tracing to')
     parser.add_argument('--no-external-calls', action='store_true', 
                        help='Disable tracking of calls to functions outside the scope')
+    parser.add_argument('--no-imports', action='store_true', 
+                       help='Disable tracking of import related calls')
     parser.add_argument('script_args', nargs='*', help='Arguments for the script being traced')
     
     args, unknown = parser.parse_known_args()
@@ -44,7 +46,7 @@ def main():
     print(f"Tracing scope: {scope_path}")
     track_external = not args.no_external_calls
     print(f"Track external calls: {track_external}")
-    start_tracing(scope_path=scope_path, main_file=script_to_trace, track_external_calls=track_external)
+    start_tracing(scope_path=scope_path, main_file=script_to_trace, track_external_calls=track_external, track_imports=not args.no_imports)
     try:
         # Add script directory to path to ensure imports work
         script_dir = os.path.dirname(script_to_trace)

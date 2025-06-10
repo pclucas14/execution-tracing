@@ -540,7 +540,7 @@ def _trace_function(frame, event, arg):
                 return _trace_function if should_recurse else None
             
             # Check if this is an import call and skip if import tracking is disabled
-            if False: #not _tracer.track_imports : and _tracer._is_import_call(func_name, file_path, caller_info):
+            if not _tracer.track_imports and _tracer._is_import_call(func_name, file_path, caller_info):
                 return _trace_function if should_recurse else None
                 
             # Skip special methods and common internals
