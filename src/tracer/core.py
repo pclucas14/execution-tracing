@@ -9,7 +9,7 @@ _call_depth = 0
 TRACER_SCOPE = None  # Directory path to restrict tracing to
 
 class Tracer:
-    def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None, track_external_calls=True):
+    def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None, track_external_calls=True, track_imports=True):
         self.is_tracing = False
         self.log = []  # Now a list of dicts for JSON output
         self.seen_functions = set()
@@ -27,6 +27,9 @@ class Tracer:
         
         # Add flag to control tracking of external calls
         self.track_external_calls = track_external_calls
+        
+        # Add flag to control tracking of import calls
+        self.track_imports = track_imports
         
         # Debug mode
         self.debug = True  # Enable debug logging
@@ -46,18 +49,22 @@ class Tracer:
         # Prepare location info
         location = None
         if file_path and line_number:
-            location = f"{os.path.basename(file_path)}:{line_number}"
+            relative_path = self._get_relative_path(file_path)
+            location = f"{relative_path}:{line_number}"
+            # location = f"{os.path.basename(file_path)}:{line_number}"
         elif file_path:
-            location = os.path.basename(file_path)
+            relative_path = self._get_relative_path(file_path)
+            location = relative_path
+            # location = os.path.basename(file_path)
         else:
             location = "unknown"
 
         # Prepare parent location
         parent_location = None
         if caller_info and caller_info[0] and caller_info[1]:
-            parent_location = f"{os.path.basename(caller_info[0])}:{caller_info[1]}"
-        else:
-            parent_location = None
+            relative_caller_path = self._get_relative_path(caller_info[0])
+            parent_location = f"{relative_caller_path}:{caller_info[1]}"
+            # parent_location = f"{os.path.basename(caller_info[0])}:{caller_info[1]}"
 
         # Format arguments intelligently
         formatted_args = self._format_arguments(args)
@@ -341,6 +348,36 @@ class Tracer:
         self.scope_entered = False
         return self.log
 
+    def _is_import_call(self, function_name, file_path, caller_info):
+        """Check if a function call is related to module importing."""
+        
+        # Get parent location for pattern matching
+        parent_location = ""
+        if caller_info and caller_info[0]:
+            parent_location = caller_info[0]
+        
+        # Check for common import patterns (same logic as visualization)
+        return (
+            '<frozen importlib._bootstrap>' in parent_location or
+            '<frozen importlib._bootstrap>' in (file_path or '') or
+            function_name == '<module>' or
+            'importlib' in (file_path or '')
+        )
+
+    def _get_relative_path(self, file_path):
+        """Convert an absolute file path to a relative path based on the scope."""
+        if not file_path:
+            return "unknown"
+        
+        # If we have a scope path, try to make the path relative to it
+        if self.scope_path and file_path.startswith(self.scope_path):
+            # Remove the scope path prefix and any leading slash
+            relative_path = file_path[len(self.scope_path):].lstrip(os.sep)
+            return relative_path if relative_path else os.path.basename(file_path)
+        
+        # For external files or files outside scope, just return the basename
+        return os.path.basename(file_path)
+
 def _is_in_scope(file_path):
     """Check if a file is within the tracing scope."""
     global TRACER_SCOPE
@@ -415,6 +452,10 @@ def _trace_function(frame, event, arg):
             if not should_log:
                 # Return None to stop tracing this branch if we shouldn't recurse
                 return _trace_function if should_recurse else None
+            
+            # Check if this is an import call and skip if import tracking is disabled
+            if False: #not _tracer.track_imports : and _tracer._is_import_call(func_name, file_path, caller_info):
+                return _trace_function if should_recurse else None
                 
             # Skip special methods and common internals
             if func_name.startswith('__') and func_name.endswith('__') and func_name != '__call__':
@@ -439,7 +480,7 @@ def _trace_function(frame, event, arg):
             except Exception:
                 # Silently fail if we can't get args
                 arg_values = {"error": "Could not extract arguments"}
-            
+
             # Calculate depth properly
             current_depth = 0
             if _tracer.scope_entered:
@@ -496,7 +537,7 @@ def set_tracer_scope(scope_path):
     else:
         TRACER_SCOPE = None
 
-def start_tracing(scope_path=None, main_file=None, track_external_calls=True):
+def start_tracing(scope_path=None, main_file=None, track_external_calls=True, track_imports=True):
     """Start tracing with a scope-limited approach."""
     global _tracer, _call_depth, TRACER_SCOPE
     
@@ -508,7 +549,7 @@ def start_tracing(scope_path=None, main_file=None, track_external_calls=True):
         set_tracer_scope(scope_path)
     
     # Create and start the tracer with main_file parameter and track_external_calls
-    _tracer = Tracer(scope_path=TRACER_SCOPE, main_file=main_file, track_external_calls=track_external_calls)
+    _tracer = Tracer(scope_path=TRACER_SCOPE, main_file=main_file, track_external_calls=track_external_calls, track_imports=track_imports)
     _tracer.start()
     
     # Install trace function
