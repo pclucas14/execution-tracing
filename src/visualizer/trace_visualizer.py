@@ -60,7 +60,7 @@ class TraceVisualizer:
         # Only include function name and location
         return f"{entry.get('name', '')}|{entry.get('location', '')}"
     
-    def format_as_tree(self, show_numbers: bool = True) -> str:
+    def format_as_tree(self, show_numbers: bool = True, show_parent_calls: bool = False) -> str:
         """Format the trace as a tree structure with indentation."""
         output_lines = []
         depth_stack = []
@@ -91,6 +91,7 @@ class TraceVisualizer:
             name = entry.get('name', 'unknown')
             location = entry.get('location', 'unknown')
             is_external = entry.get('is_external', False)
+            parent_call = entry.get('parent_call', '')
             
             # For grouped calls, show argument variations if they differ
             if count > 1:
@@ -107,14 +108,19 @@ class TraceVisualizer:
             else:
                 args = self._format_arguments_concise(entry.get('arguments', {}))
             
-            # Build the line
+            # Build the line with depth information
+            depth_str = f"[depth:{depth}] "
             if count > 1:
-                line = f"{call_number_str}{indent}{name}({args}) [{location}] x {count} times"
+                line = f"{call_number_str}{depth_str}{indent}{name}({args}) [{location}] x {count} times"
             else:
-                line = f"{call_number_str}{indent}{name}({args}) [{location}]"
+                line = f"{call_number_str}{depth_str}{indent}{name}({args}) [{location}]"
             
             if is_external:
                 line += " [EXTERNAL]"
+            
+            # Add parent call if requested and available
+            if show_parent_calls and parent_call:
+                line += f" ← {parent_call}"
             
             output_lines.append(line)
             

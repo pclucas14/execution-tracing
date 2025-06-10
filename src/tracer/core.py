@@ -33,6 +33,9 @@ class Tracer:
         
         # Debug mode
         self.debug = True  # Enable debug logging
+        
+        # Store the original command
+        self.original_command = ' '.join(sys.argv)
 
         
     def start(self):
@@ -41,7 +44,7 @@ class Tracer:
     def stop(self):
         self.is_tracing = False
     
-    def log_function_call(self, function_name, args, file_path=None, line_number=None, caller_info=None, depth=0, is_external=False):
+    def log_function_call(self, function_name, args, file_path=None, line_number=None, caller_info=None, depth=0, is_external=False, parent_call=None):
         """Log a function call as a dict for JSON output."""
         if not self.is_tracing:
             return
@@ -51,20 +54,17 @@ class Tracer:
         if file_path and line_number:
             relative_path = self._get_relative_path(file_path)
             location = f"{relative_path}:{line_number}"
-            # location = f"{os.path.basename(file_path)}:{line_number}"
         elif file_path:
             relative_path = self._get_relative_path(file_path)
             location = relative_path
-            # location = os.path.basename(file_path)
         else:
             location = "unknown"
 
-        # Prepare parent location
+        # Prepare parent location - show absolute path if outside scope
         parent_location = None
         if caller_info and caller_info[0] and caller_info[1]:
             relative_caller_path = self._get_relative_path(caller_info[0])
             parent_location = f"{relative_caller_path}:{caller_info[1]}"
-            # parent_location = f"{os.path.basename(caller_info[0])}:{caller_info[1]}"
 
         # Format arguments intelligently
         formatted_args = self._format_arguments(args)
@@ -72,20 +72,30 @@ class Tracer:
         entry = {
             "location": location,
             "parent_location": parent_location,
+            "parent_call": parent_call,  # Add the actual code that made this call
             "name": function_name,
-            "arguments": formatted_args,  # This is what the HTML visualizer looks for
+            "arguments": formatted_args,
             "depth": depth,
             "is_external": is_external,
-            # Also add args/kwargs for compatibility with pattern grouping
-            "args": {},  # Could separate positional args here if needed
-            "kwargs": formatted_args  # For now, treat all as keyword args
+            "args": {},
+            "kwargs": formatted_args
         }
         self.log.append(entry)
     
     def get_trace_output(self):
-        """Return the log as a JSON string."""
+        """Return the log as a JSON string with metadata."""
         try:
-            return json.dumps(self.log, indent=2, default=str)
+            output_data = {
+                "metadata": {
+                    "original_command": self.original_command,
+                    "scope_path": self.scope_path,
+                    "main_file": self.main_file,
+                    "total_calls": len(self.log),
+                    "timestamp": __import__('datetime').datetime.now().isoformat()
+                },
+                "trace_data": self.log
+            }
+            return json.dumps(output_data, indent=2, default=str)
         except TypeError as e:
             # If there are still serialization issues, convert problematic objects to strings
             safe_log = []
@@ -94,7 +104,18 @@ class Tracer:
                 for key, value in entry.items():
                     safe_entry[str(key)] = self._make_json_safe(value)
                 safe_log.append(safe_entry)
-            return json.dumps(safe_log, indent=2, default=str)
+            
+            output_data = {
+                "metadata": {
+                    "original_command": self.original_command,
+                    "scope_path": self.scope_path,
+                    "main_file": self.main_file,
+                    "total_calls": len(safe_log),
+                    "timestamp": __import__('datetime').datetime.now().isoformat()
+                },
+                "trace_data": safe_log
+            }
+            return json.dumps(output_data, indent=2, default=str)
     
     def _make_json_safe(self, obj):
         """Recursively make an object JSON-safe by converting problematic types."""
@@ -364,7 +385,7 @@ class Tracer:
             'importlib' in (file_path or '')
         )
 
-    def _get_relative_path(self, file_path):
+    def _get_relative_path(self, file_path, show_absolute_if_external=True):
         """Convert an absolute file path to a relative path based on the scope."""
         if not file_path:
             return "unknown"
@@ -375,9 +396,74 @@ class Tracer:
             relative_path = file_path[len(self.scope_path):].lstrip(os.sep)
             return relative_path if relative_path else os.path.basename(file_path)
         
-        # For external files or files outside scope, just return the basename
-        return os.path.basename(file_path)
+        # For external files or files outside scope
+        if show_absolute_if_external:
+            return file_path  # Return full absolute path
+        else:
+            return os.path.basename(file_path)  # Just return the basename
 
+    def _get_source_line(self, frame):
+        """Extract the source code line(s) from a frame."""
+        if not frame:
+            return None
+            
+        try:
+            import linecache
+            filename = frame.f_code.co_filename
+            lineno = frame.f_lineno
+            
+            # Check for special cases where source is not available
+            if '<frozen' in filename:
+                return f"<frozen module call>"
+            
+            if filename.startswith('<'):
+                return f"<built-in or generated code>"
+            
+            # Get the line from the file
+            line = linecache.getline(filename, lineno)
+            if line:
+                # Strip whitespace and return the line
+                line = line.strip()
+                
+                # For multi-line calls, try to get additional context
+                # Check if the line looks incomplete (ends with comma, opening paren, etc.)
+                if line and (line.endswith(',') or line.endswith('(') or 
+                           line.count('(') > line.count(')') or
+                           line.count('[') > line.count(']') or
+                           line.count('{') > line.count('}')):
+                    # Try to get the next few lines to complete the call
+                    additional_lines = []
+                    for i in range(1, 4):  # Look ahead up to 3 lines
+                        next_line = linecache.getline(filename, lineno + i)
+                        if next_line:
+                            next_line = next_line.strip()
+                            additional_lines.append(next_line)
+                            # Stop if we seem to have completed the call
+                            combined = line + ' ' + ' '.join(additional_lines)
+                            if (combined.count('(') == combined.count(')') and
+                                combined.count('[') == combined.count(']') and
+                                combined.count('{') == combined.count('}')):
+                                break
+                        else:
+                            break
+                    
+                    if additional_lines:
+                        line = line + ' ' + ' '.join(additional_lines)
+                
+                # Limit length to avoid extremely long lines
+                if len(line) > 150:
+                    line = line[:147] + "..."
+                    
+                return line
+            else:
+                # If we can't read the line, provide a fallback
+                return f"<source unavailable: {os.path.basename(filename)}:{lineno}>"
+            
+        except Exception as e:
+            # If we can't get the source, return a descriptive error
+            return f"<source error: {str(e)}>"
+            
+        return None
 def _is_in_scope(file_path):
     """Check if a file is within the tracing scope."""
     global TRACER_SCOPE
@@ -501,7 +587,8 @@ def _trace_function(frame, event, arg):
                 line_number,
                 caller_info,
                 depth=current_depth,
-                is_external=is_external
+                is_external=is_external,
+                parent_call=_tracer._get_source_line(frame.f_back)  # Get the actual code that led to this call
             )
             
             # Return None to stop tracing this branch if we shouldn't recurse

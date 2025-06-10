@@ -250,5 +250,102 @@ class TestTracer(unittest.TestCase):
         self.assertEqual(entry['args']['pos1'], 'value1')
         self.assertEqual(entry['kwargs']['kw1'], 'kwvalue1')
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_parent_call_tracking(self):
+        """Test that parent call source code is captured."""
+        self.tracer.start()
+        
+        # Simulate a function call with parent call information
+        parent_call = "self.some_method(arg1, arg2)"
+        self.tracer.log_function_call(
+            'some_method', 
+            {'self': 'TestObject', 'arg1': 'value1', 'arg2': 42}, 
+            '/test/file.py', 
+            123, 
+            ('/test/caller.py', 45), 
+            0, 
+            False, 
+            parent_call=parent_call
+        )
+        
+        # Verify the parent call was logged
+        self.assertEqual(len(self.tracer.log), 1)
+        logged_call = self.tracer.log[0]
+        self.assertEqual(logged_call['parent_call'], parent_call)
+        self.assertEqual(logged_call['name'], 'some_method')
+
+    def test_parent_call_none_when_not_available(self):
+        """Test that parent_call is None when source code cannot be extracted."""
+        self.tracer.start()
+        
+        # Simulate a function call without parent call information
+        self.tracer.log_function_call(
+            'some_function', 
+            {'arg': 'value'}, 
+            '/test/file.py', 
+            123, 
+            None, 
+            0, 
+            False, 
+            parent_call=None
+        )
+        
+        # Verify the parent call is None
+        self.assertEqual(len(self.tracer.log), 1)
+        logged_call = self.tracer.log[0]
+        self.assertIsNone(logged_call['parent_call'])
+
+    def test_parent_call_in_json_output(self):
+        """Test that parent_call is included in JSON output."""
+        import json
+        
+        self.tracer.start()
+        parent_call = "function_call(with_args=True)"
+        self.tracer.log_function_call(
+            'test_function', 
+            {'with_args': True}, 
+            is_external=False,
+            parent_call=parent_call
+        )
+        
+        output = self.tracer.get_trace_output()
+        parsed = json.loads(output)
+        
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]['parent_call'], parent_call)
+        self.assertEqual(parsed[0]['name'], 'test_function')
+
+    def test_get_source_line_method(self):
+        """Test the _get_source_line method."""
+        # This test would need a mock frame object to test properly
+        # For now, just verify the method exists and handles None input
+        result = self.tracer._get_source_line(None)
+        self.assertIsNone(result)
+
+    def test_parent_call_structure_for_visualization(self):
+        """Test that parent_call is structured properly for the HTML visualization."""
+        self.tracer.start()
+        
+        parent_call = "config = SomeConfig(param1='value', param2=42)"
+        self.tracer.log_function_call(
+            '__init__', 
+            {'self': 'SomeConfig object', 'param1': 'value', 'param2': 42},
+            '/test/file.py', 
+            10,
+            ('/test/caller.py', 25),
+            0, 
+            False,
+            parent_call=parent_call
+        )
+        
+        logged_call = self.tracer.log[0]
+        
+        # Verify structure matches what HTML visualizer expects
+        self.assertIn('parent_call', logged_call)
+        self.assertIn('parent_location', logged_call)
+        self.assertIn('name', logged_call)
+        self.assertIn('arguments', logged_call)
+        
+        # Verify content
+        self.assertEqual(logged_call['parent_call'], parent_call)
+        self.assertEqual(logged_call['parent_location'], 'caller.py:25')
+        self.assertEqual(logged_call['name'], '__init__')

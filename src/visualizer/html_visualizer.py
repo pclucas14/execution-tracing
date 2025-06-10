@@ -9,7 +9,16 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
     
     # Load trace data
     with open(trace_file, 'r') as f:
-        trace_data = json.load(f)
+        raw_data = json.load(f)
+    
+    # Handle both old format (list) and new format (dict with metadata)
+    if isinstance(raw_data, dict) and 'trace_data' in raw_data:
+        trace_data = raw_data['trace_data']
+        metadata = raw_data.get('metadata', {})
+    else:
+        # Legacy format - just a list of trace entries
+        trace_data = raw_data
+        metadata = {}
     
     # Group patterns if requested
     if group_patterns and isinstance(trace_data, list):
@@ -21,7 +30,7 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
     
     # Generate summary for original data
     if isinstance(trace_data, list):
-        summary_output = _generate_summary_stats(trace_data)
+        summary_output = _generate_summary_stats(trace_data, metadata)
     else:
         summary_output = "No trace data found"
     
@@ -57,6 +66,16 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             border-radius: 5px;
             margin-bottom: 20px;
             white-space: pre-wrap;
+            color: #000;  /* Make text black for better visibility */
+        }}
+        .metadata-info {{
+            color: #000;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }}
+        .stats-section {{
+            color: #333;
+            margin-top: 10px;
         }}
         .trace-tree {{
             background-color: #f8f8f8;
@@ -337,7 +356,7 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
     else:
         return html_content
 
-def _generate_summary_stats(trace_data: List[Dict[str, Any]]) -> str:
+def _generate_summary_stats(trace_data: List[Dict[str, Any]], metadata: Dict[str, Any] = None) -> str:
     """Generate summary statistics for trace data."""
     if not trace_data:
         return "No trace data found"
@@ -349,14 +368,34 @@ def _generate_summary_stats(trace_data: List[Dict[str, Any]]) -> str:
     unique_functions = len(set(call.get('name', 'unknown') for call in trace_data))
     unique_locations = len(set(call.get('location', 'unknown') for call in trace_data))
     
-    return f"""📊 Trace Statistics:
+    # Build summary with metadata if available
+    summary_parts = []
+    
+    if metadata:
+        summary_parts.append('<div class="metadata-info">')
+        if metadata.get('original_command'):
+            summary_parts.append(f'💻 Original Command: <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: \'Courier New\', monospace;">{metadata["original_command"]}</code>')
+        if metadata.get('scope_path'):
+            summary_parts.append(f'📁 Scope Path: <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: \'Courier New\', monospace;">{metadata["scope_path"]}</code>')
+        if metadata.get('main_file'):
+            summary_parts.append(f'📄 Main File: <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: \'Courier New\', monospace;">{metadata["main_file"]}</code>')
+        if metadata.get('timestamp'):
+            summary_parts.append(f'🕐 Timestamp: <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: \'Courier New\', monospace;">{metadata["timestamp"]}</code>')
+        summary_parts.append('</div>')
+        summary_parts.append('<div style="border-top: 2px solid #333; margin: 10px 0;"></div>')
+    
+    summary_parts.append('<div class="stats-section">')
+    summary_parts.append(f"""📊 Trace Statistics:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Total function calls: {total_calls:,}
 Internal calls: {internal_calls:,}
 External calls: {external_calls:,}
 Unique functions: {unique_functions:,}
 Unique locations: {unique_locations:,}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━""")
+    summary_parts.append('</div>')
+    
+    return '\n'.join(summary_parts)
 
 def _format_grouped_calls(grouped_data: List[Dict[str, Any]], original_trace_data: List[Dict[str, Any]], depth: int = 0) -> str:
     """Format grouped calls as HTML with clickable entries."""
@@ -381,13 +420,25 @@ def _format_pattern_group(pattern_group: Dict[str, Any], original_trace_data: Li
     end_index = pattern_group.get('end_index', 0)
     
     pattern_calls = pattern_group.get('pattern_calls', [])
+    
+    # Get depth range for the pattern
+    depths = [call.get('depth', 0) for call in pattern_calls if 'depth' in call]
+    depth_info = ""
+    if depths:
+        min_depth = min(depths)
+        max_depth = max(depths)
+        if min_depth == max_depth:
+            depth_info = f" (depth: {min_depth})"
+        else:
+            depth_info = f" (depths: {min_depth}-{max_depth})"
+    
     content_html = _format_grouped_calls(pattern_calls, original_trace_data, depth + 1)
     
     return f"""
 <div class="pattern-group">
     <div class="pattern-header" onclick="togglePatternGroup(this)">
         <span class="pattern-toggle">▼</span>
-        🔄 Repeating Pattern: {repetitions}x repetitions of {pattern_length} calls 
+        🔄 Repeating Pattern: {repetitions}x repetitions of {pattern_length} calls{depth_info}
         (calls #{start_index + 1}-#{end_index + 1}, total: {total_calls} calls)
     </div>
     <div class="pattern-content">
@@ -416,14 +467,16 @@ def _format_single_call(call: Dict[str, Any], original_trace_data: List[Dict[str
     """Format a single call as HTML with clickable arguments."""
     name = call.get('name', 'unknown')
     location = call.get('location', 'unknown')
+    parent_location = call.get('parent_location', '')
+    parent_call = call.get('parent_call', '')
     is_external = call.get('is_external', False)
     is_import = _is_import_call(call)
+    call_depth = call.get('depth', 0)
     
     # Find the original trace entry to get full argument data
     original_entry = None
     call_name = call.get('name', '')
     call_location = call.get('location', '')
-    
     for entry in original_trace_data:
         if (entry.get('name') == call_name and 
             entry.get('location') == call_location):
@@ -440,70 +493,86 @@ def _format_single_call(call: Dict[str, Any], original_trace_data: List[Dict[str
     
     indent = "  " * depth
     call_id = f"call_{index}_{hash(str(call))}"
-    
     args_display = ""
     if arguments:
         args_count = len(arguments)
         args_display = f" ({args_count} args)"
     
-    args_html = _format_arguments_html(arguments)
+    # Add parent call info if available
+    parent_call_display = ""
+    if parent_call:
+        parent_call_display = f' <span style="color: #888; font-style: italic;">← {parent_call}</span>'
+    
+    depth_badge = f'<span style="background: #007acc; color: white; padding: 1px 4px; border-radius: 3px; font-size: 0.85em; margin-right: 4px;">d:{call_depth}</span>'
+    args_html = _format_arguments_html(arguments, parent_location, parent_call)
     
     return f"""<div class="{css_classes}" onclick="toggleCallArgs('{call_id}')">
-{indent}[#{index + 1}] <strong>{name}</strong>{args_display} <span style="color: #666;">[{location}]</span>
+{indent}{depth_badge}[#{index + 1}] <strong>{name}</strong>{args_display} <span style="color: #666;">[{location}]</span>{parent_call_display}
 </div>
 <div id="args_{call_id}" class="args-container" style="display: none;">
     {args_html}
 </div>"""
 
-def _format_arguments_html(arguments: dict) -> str:
+def _format_arguments_html(arguments: dict, parent_location: str = None, parent_call: str = None) -> str:
     """Format arguments as HTML for display."""
+    html_parts = []
+    
+    # Add parent call information at the top if available
+    if parent_call or parent_location:
+        html_parts.append('<div class="args-header">Call Context:</div>')
+        if parent_location:
+            html_parts.append(f'<div class="arg-item"><span class="arg-name">Called from:</span> <span class="arg-value">{parent_location}</span></div>')
+        if parent_call:
+            html_parts.append(f'<div class="arg-item"><span class="arg-name">Source code:</span> <span class="arg-value" style="font-family: monospace; background: #f5f5f5; padding: 2px 4px; border-radius: 3px;">{parent_call}</span></div>')
+        html_parts.append('<div style="margin: 8px 0; border-top: 1px solid #ddd;"></div>')
+    
     if not arguments:
-        return '<div class="no-args">No arguments</div>'
-    
-    html_parts = ['<div class="args-header">Function Arguments:</div>']
-    
-    for name, value in arguments.items():
-        if isinstance(value, str):
-            if len(value) > 50:
-                formatted_value = f'"{value[:47]}..."'
-            else:
-                formatted_value = f'"{value}"'
-            value_type = 'str'
-        elif isinstance(value, (int, float)):
-            formatted_value = str(value)
-            value_type = 'int' if isinstance(value, int) else 'float'
-        elif isinstance(value, bool):
-            formatted_value = str(value)
-            value_type = 'bool'
-        elif value is None:
-            formatted_value = 'None'
-            value_type = 'NoneType'
-        elif isinstance(value, (list, tuple)):
-            if len(value) == 0:
-                formatted_value = '[]' if isinstance(value, list) else '()'
-            elif len(value) > 3:
-                formatted_value = f'[...{len(value)} items]'
+        html_parts.append('<div class="args-header">Function Arguments:</div>')
+        html_parts.append('<div class="no-args">No arguments</div>')
+    else:
+        html_parts.append('<div class="args-header">Function Arguments:</div>')
+        for name, value in arguments.items():
+            if isinstance(value, str):
+                if len(value) > 50:
+                    formatted_value = f'"{value[:47]}..."'
+                else:
+                    formatted_value = f'"{value}"'
+                value_type = 'str'
+            elif isinstance(value, (int, float)):
+                formatted_value = str(value)
+                value_type = 'int' if isinstance(value, int) else 'float'
+            elif isinstance(value, bool):
+                formatted_value = str(value)
+                value_type = 'bool'
+            elif value is None:
+                formatted_value = 'None'
+                value_type = 'NoneType'
+            elif isinstance(value, (list, tuple)):
+                if len(value) == 0:
+                    formatted_value = '[]' if isinstance(value, list) else '()'
+                elif len(value) > 3:
+                    formatted_value = f'[...{len(value)} items]'
+                else:
+                    formatted_value = str(value)
+                value_type = 'list' if isinstance(value, list) else 'tuple'
+            elif isinstance(value, dict):
+                if len(value) == 0:
+                    formatted_value = '{}'
+                elif len(value) > 3:
+                    formatted_value = f'{{{len(value)} keys}}';
+                else:
+                    formatted_value = str(value)
+                value_type = 'dict'
             else:
                 formatted_value = str(value)
-            value_type = 'list' if isinstance(value, list) else 'tuple'
-        elif isinstance(value, dict):
-            if len(value) == 0:
-                formatted_value = '{}'
-            elif len(value) > 3:
-                formatted_value = f'{{{len(value)} keys}}';
-            else:
-                formatted_value = str(value)
-            value_type = 'dict'
-        else:
-            formatted_value = str(value)
-            value_type = type(value).__name__
+                value_type = type(value).__name__
             
-        html_parts.append(f'''
-            <div class="arg-item">
-                <span class="arg-name">{name}:</span>
-                <span class="arg-value">{formatted_value}</span>
-                <span class="arg-type">({value_type})</span>
-            </div>
-        ''')
+            html_parts.append(f'''
+                <div class="arg-item">
+                    <span class="arg-name">{name}:</span>
+                    <span class="arg-value">{formatted_value}</span>
+                    <span class="arg-type">({value_type})</span>
+                </div>
+            ''')
     
     return ''.join(html_parts)
