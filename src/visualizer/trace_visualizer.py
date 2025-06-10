@@ -207,6 +207,32 @@ class TraceVisualizer:
         
         dot_lines.append("}")
         return "\n".join(dot_lines)
+    
+    def get_call_type_legend(self):
+        """Return a legend mapping symbols to call types for visualization."""
+        legend = {
+            "🔧": "function_call - Regular function calls within scope",
+            "⚙️": "method_call - Method calls on objects", 
+            "🏗️": "class_method - Class method calls",
+            "🏭": "class_instantiation - Class __init__ methods",
+            "✨": "special_method - Dunder methods (__str__, __repr__, etc.)",
+            "📞": "callable_object - __call__ method invocations",
+            "λ": "lambda_function - Anonymous lambda functions",
+            "📦": "module_execution - Module-level code execution",
+            "📥": "import - Module import operations",
+            "🔗": "external_call - Calls to external libraries/modules",
+            "🔄": "comprehension - List/dict/set comprehensions and generators",
+            "❓": "unknown - Unclassified call types"
+        }
+        return legend
+
+    def print_call_type_legend(self):
+        """Print a formatted legend of call type symbols."""
+        legend = self.get_call_type_legend()
+        print("\n=== Call Type Legend ===")
+        for symbol, description in legend.items():
+            print(f"{symbol} {description}")
+        print("========================\n")
 
 
 def visualize_trace(input_file: str, output_format: str = "tree", output_file: str = None):

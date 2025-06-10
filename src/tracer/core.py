@@ -49,6 +49,9 @@ class Tracer:
         if not self.is_tracing:
             return
 
+        # Determine call type
+        call_type = self._classify_call_type(function_name, file_path, caller_info, is_external)
+
         # Prepare location info
         location = None
         if file_path and line_number:
@@ -77,11 +80,48 @@ class Tracer:
             "arguments": formatted_args,
             "depth": depth,
             "is_external": is_external,
+            "call_type": call_type,
             "args": {},
             "kwargs": formatted_args
         }
         self.log.append(entry)
-    
+
+    def _classify_call_type(self, function_name, file_path, caller_info, is_external):
+        """Classify the type of function call."""
+        # Check for import-related calls
+        if self._is_import_call(function_name, file_path, caller_info):
+            return "import"
+        
+        # Check for module execution
+        if function_name == '<module>':
+            return "module_execution"
+        
+        # Check for class instantiation
+        if function_name == '__init__':
+            return "class_instantiation"
+        
+        # Check for special/dunder methods
+        if function_name.startswith('__') and function_name.endswith('__'):
+            if function_name == '__call__':
+                return "callable_object"
+            else:
+                return "special_method"
+        
+        # Check for lambda/anonymous functions
+        if function_name == '<lambda>':
+            return "lambda_function"
+        
+        # Check for comprehensions (filtered out but classified for completeness)
+        if function_name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
+            return "comprehension"
+        
+        # Classify based on external status
+        if is_external:
+            return "external_call"
+        
+        # Default to regular function call
+        return "function_call"
+
     def get_trace_output(self):
         """Return the log as a JSON string with metadata."""
         try:
