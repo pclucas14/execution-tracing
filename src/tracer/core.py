@@ -50,7 +50,7 @@ class Tracer:
             return
 
         # Determine call type
-        call_type = self._classify_call_type(function_name, file_path, caller_info, is_external)
+        call_type = self._classify_call_type(function_name, file_path, caller_info, is_external, parent_call)
 
         # Prepare location info
         location = None
@@ -86,7 +86,7 @@ class Tracer:
         }
         self.log.append(entry)
 
-    def _classify_call_type(self, function_name, file_path, caller_info, is_external):
+    def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Classify the type of function call."""
         # Check for import-related calls
         if self._is_import_call(function_name, file_path, caller_info):
@@ -95,6 +95,10 @@ class Tracer:
         # Check for module execution
         if function_name == '<module>':
             return "module_execution"
+        
+        # Check for class declarations (class definitions, not instantiations)
+        if self._is_class_declaration(function_name, caller_info, parent_call):
+            return "class_declaration"
         
         # Check for class instantiation
         if function_name == '__init__':
@@ -121,6 +125,45 @@ class Tracer:
         
         # Default to regular function call
         return "function_call"
+
+    def _is_class_declaration(self, function_name, caller_info, parent_call=None):
+        """Check if this is a class declaration (class definition) rather than instantiation."""
+        # Skip dunder methods and module-level code
+        if (function_name.startswith('__') and function_name.endswith('__')) or function_name == '<module>':
+            return False
+        
+        # Use the parent_call if it's provided (most reliable)
+        if parent_call:
+            # Look for patterns like "class ClassName:" or "class ClassName(Parent):"
+            import re
+            class_def_pattern = r'^\s*class\s+' + re.escape(function_name) + r'\s*[\(:]'
+            if re.match(class_def_pattern, parent_call.strip()):
+                return True
+                
+            # Also check for class definitions without the exact name match
+            # (in case of metaclass calls or inheritance)
+            if parent_call.strip().startswith('class ') and ':' in parent_call:
+                return True
+        
+        # Fallback: try to get parent call information from frame inspection if parent_call wasn't provided
+        if not parent_call and caller_info and len(caller_info) > 0:
+            try:
+                import sys
+                frame = sys._getframe(3)  # Go back to find the actual call frame
+                frame_parent_call = self._get_source_line(frame)
+                if frame_parent_call:
+                    import re
+                    class_def_pattern = r'^\s*class\s+' + re.escape(function_name) + r'\s*[\(:]'
+                    if re.match(class_def_pattern, frame_parent_call.strip()):
+                        return True
+                        
+                    # Also check for class definitions without the exact name match
+                    if frame_parent_call.strip().startswith('class ') and ':' in frame_parent_call:
+                        return True
+            except Exception:
+                pass
+        
+        return False
 
     def get_trace_output(self):
         """Return the log as a JSON string with metadata."""

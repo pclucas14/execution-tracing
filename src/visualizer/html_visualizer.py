@@ -1,7 +1,6 @@
 import json
 import os
 from typing import List, Dict, Any
-from .trace_visualizer import TraceVisualizer
 from .pattern_grouper import group_trace_patterns
 
 def generate_html_visualization(trace_file: str, output_file: str = None, group_patterns: bool = True):
@@ -82,7 +81,7 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             border-radius: 5px;
             margin-bottom: 20px;
             white-space: pre-wrap;
-            color: #000;  /* Make text black for better visibility */
+            color: #000;
         }}
         .metadata-info {{
             color: #000;
@@ -338,6 +337,10 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
                 <div class="legend-item">
                     <span class="legend-badge">{_get_call_type_badge('class_instantiation')}</span>
                     <span class="legend-description">class_instantiation - Class __init__ methods</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge">{_get_call_type_badge('class_declaration')}</span>
+                    <span class="legend-description">class_declaration - Class definitions (not instantiations)</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-badge">{_get_call_type_badge('special_method')}</span>
@@ -742,10 +745,10 @@ def _generate_summary_stats(trace_data: List[Dict[str, Any]], metadata: Dict[str
         percentage = (count / total_calls) * 100
         call_type_breakdown.append(f'{badge} {call_type}: {count:,} ({percentage:.1f}%)')
     
-    call_type_section = '\n'.join(call_type_breakdown);
+    call_type_section = '\n'.join(call_type_breakdown)
     
     summary_parts.append(f"""📊 Trace Statistics:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Total function calls: {total_calls:,}
 Internal calls: {internal_calls:,}
 External calls: {external_calls:,}
@@ -981,7 +984,7 @@ def _format_arg_value_for_html(value) -> str:
         else:
             escaped = str_repr.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             return f'&lt;{escaped}&gt;'
-    except:
+    except Exception:
         return f'&lt;{type(value).__name__} object&gt;'
 
 def _get_arg_type_for_html(value) -> str:
@@ -1014,6 +1017,7 @@ def _get_call_type_badge(call_type: str) -> str:
         'method_call': '#17a2b8',        # Cyan
         'class_method': '#6f42c1',       # Purple
         'class_instantiation': '#fd7e14', # Orange
+        'class_declaration': '#e83e8c',  # Pink
         'special_method': '#6c757d',     # Gray
         'callable_object': '#20c997',    # Teal
         'lambda_function': '#e83e8c',    # Pink
@@ -1029,6 +1033,7 @@ def _get_call_type_badge(call_type: str) -> str:
         'method_call': '⚙️',
         'class_method': '🏗️',
         'class_instantiation': '🏭',
+        'class_declaration': '🎨',
         'special_method': '✨',
         'callable_object': '📞',
         'lambda_function': 'λ',
@@ -1042,4 +1047,4 @@ def _get_call_type_badge(call_type: str) -> str:
     color = type_colors.get(call_type, type_colors['unknown'])
     symbol = type_symbols.get(call_type, type_symbols['unknown'])
     
-    return f'<span style="background: {color}; color: white; padding: 1px 4px; border-radius: 3px; font-size: 0.8em; margin-right: 4px;" title="{call_type}">{symbol}</span>';
+    return f'<span style="background: {color}; color: white; padding: 1px 4px; border-radius: 3px; font-size: 0.8em; margin-right: 4px;" title="{call_type}">{symbol}</span>'
