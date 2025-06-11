@@ -45,6 +45,16 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
     # Generate filter controls for each call type
     filter_controls = _generate_call_type_filters(call_types_in_data)
 
+    # Generate suggested filename for filtered export
+    trace_basename = os.path.basename(trace_file)
+    trace_name, trace_ext = os.path.splitext(trace_basename)
+    import random
+    random_suffix = f"_{random.randint(1000, 9999)}"
+    suggested_filename = f"{trace_name}_filtered{random_suffix}{trace_ext}"
+    
+    # Get the directory of the original trace file for server-side saving
+    trace_directory = os.path.dirname(os.path.abspath(trace_file))
+
     # Create HTML content
     html_content = f"""
 <!DOCTYPE html>
@@ -252,6 +262,54 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
         .legend-description {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }}
+        .save-section {{
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }}
+        .save-controls {{
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }}
+        .filename-input {{
+            flex: 1;
+            min-width: 300px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }}
+        .save-button {{
+            background-color: #007acc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }}
+        .save-button:hover {{
+            background-color: #005a9f;
+        }}
+        .save-button:disabled {{
+            background-color: #ccc;
+            cursor: not-allowed;
+        }}
+        .save-info {{
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }}
+        .server-path {{
+            font-size: 11px;
+            color: #888;
+            font-style: italic;
+            margin-top: 3px;
+        }}
     </style>
 </head>
 <body>
@@ -337,12 +395,36 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             </div>
         </div>
         
+        <div class="save-section">
+            <div class="legend-title">💾 Save Filtered Data</div>
+            <div class="save-controls">
+                <input type="text" class="filename-input" id="exportFilename" 
+                       value="{suggested_filename}" 
+                       placeholder="Enter filename for filtered export">
+                <button class="save-button" onclick="saveFilteredData()">
+                    Save to Server
+                </button>
+            </div>
+            <div class="save-info">
+                Export will include only the calls visible with current filter settings.
+                Original metadata and structure will be preserved.
+            </div>
+            <div class="server-path">
+                Files will be saved to: {trace_directory}/
+            </div>
+        </div>
+        
         <div class="trace-tree" id="traceTree">
 {_format_grouped_calls(grouped_data, trace_data)}
         </div>
     </div>
     
     <script>
+        // Store the original trace data for filtering
+        const originalTraceData = {json.dumps(trace_data, default=str)};
+        const originalMetadata = {json.dumps(metadata, default=str)};
+        const serverPath = {json.dumps(trace_directory)};
+        
         function formatArgValue(value) {{
             if (value === null) return 'None';
             if (typeof value === 'string') {{
@@ -452,6 +534,151 @@ def generate_html_visualization(trace_file: str, output_file: str = None, group_
             const toggle = element.querySelector('.pattern-toggle');
             toggle.textContent = content.classList.contains('collapsed') ? '▶' : '▼';
         }}
+        
+        function getActiveFilters() {{
+            const filters = {{
+                showExternal: document.getElementById('showExternal')?.checked ?? true,
+                callTypes: {{}}
+            }};
+            
+            // Get all call type checkboxes
+            const callTypeCheckboxes = document.querySelectorAll('[id^="show"][id$="call"], [id^="show"][id$="method"], [id^="show"][id$="function"], [id^="show"][id$="instantiation"], [id^="show"][id$="execution"], [id^="show"][id$="import"], [id^="show"][id$="lambda"], [id^="show"][id$="object"], [id^="show"][id$="comprehension"], [id^="show"][id$="unknown"]');
+            
+            callTypeCheckboxes.forEach(checkbox => {{
+                const callType = checkbox.getAttribute('onchange')?.match(/toggleCallType\\('([^']+)'\\)/)?.[1];
+                if (callType) {{
+                    filters.callTypes[callType] = checkbox.checked;
+                }}
+            }});
+            
+            return filters;
+        }}
+        
+        function shouldIncludeCall(call, filters) {{
+            // Check external filter
+            if (call.is_external && !filters.showExternal) {{
+                return false;
+            }}
+            
+            // Check call type filter
+            const callType = call.call_type || 'unknown';
+            if (filters.callTypes[callType] === false) {{
+                return false;
+            }}
+            
+            return true;
+        }}
+        
+        function getFilteredTraceData() {{
+            const filters = getActiveFilters();
+            const filteredData = originalTraceData.filter(call => shouldIncludeCall(call, filters));
+            
+            return {{
+                metadata: {{
+                    ...originalMetadata,
+                    filtered: true,
+                    filter_applied_at: new Date().toISOString(),
+                    original_total_calls: originalTraceData.length,
+                    filtered_total_calls: filteredData.length,
+                    filters_applied: filters
+                }},
+                trace_data: filteredData
+            }};
+        }}
+        
+        function saveFilteredData() {{
+            try {{
+                const filteredData = getFilteredTraceData();
+                const filename = document.getElementById('exportFilename').value.trim();
+                
+                if (!filename) {{
+                    alert('Please enter a filename for the export.');
+                    return;
+                }}
+                
+                // Ensure filename has .json extension
+                const finalFilename = filename.endsWith('.json') ? filename : filename + '.json';
+                
+                // Disable button during save
+                const button = document.querySelector('.save-button');
+                const originalText = button.textContent;
+                button.textContent = 'Saving...';
+                button.disabled = true;
+                
+                // Send to server
+                fetch('/save_filtered', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                    }},
+                    body: JSON.stringify({{
+                        filename: finalFilename,
+                        data: filteredData,
+                        directory: serverPath
+                    }})
+                }})
+                .then(response => response.json())
+                .then(result => {{
+                    if (result.success) {{
+                        button.textContent = 'Saved!';
+                        button.style.backgroundColor = '#28a745';
+                        
+                        // Update the info to show the saved file path
+                        const info = document.querySelector('.save-info');
+                        info.innerHTML = `<strong>✓ Saved successfully to:</strong> ${{result.filepath}}<br>Export included ${{filteredData.trace_data.length}} of ${{originalTraceData.length}} calls with current filter settings.`;
+                        
+                        console.log(`Saved ${{filteredData.trace_data.length}} calls to ${{result.filepath}}`);
+                    }} else {{
+                        throw new Error(result.error || 'Unknown error occurred');
+                    }}
+                }})
+                .catch(error => {{
+                    console.error('Error saving filtered data:', error);
+                    alert('Error saving data: ' + error.message);
+                    button.textContent = 'Error';
+                    button.style.backgroundColor = '#dc3545';
+                }})
+                .finally(() => {{
+                    // Reset button after 3 seconds
+                    setTimeout(() => {{
+                        button.textContent = originalText;
+                        button.style.backgroundColor = '#007acc';
+                        button.disabled = false;
+                    }}, 3000);
+                }});
+                
+            }} catch (error) {{
+                console.error('Error preparing filtered data:', error);
+                alert('Error preparing data: ' + error.message);
+            }}
+        }}
+        
+        // Update export info when filters change
+        function updateExportInfo() {{
+            const filteredData = getFilteredTraceData();
+            const info = document.querySelector('.save-info');
+            if (info && !info.innerHTML.includes('Saved successfully')) {{
+                info.textContent = `Export will include ${{filteredData.trace_data.length}} of ${{originalTraceData.length}} calls with current filter settings.`;
+            }}
+        }}
+        
+        // Override existing filter functions to update export info
+        const originalToggleExternal = toggleExternal;
+        toggleExternal = function() {{
+            originalToggleExternal();
+            updateExportInfo();
+        }};
+        
+        const originalToggleCallType = toggleCallType;
+        toggleCallType = function(callType) {{
+            originalToggleCallType(callType);
+            updateExportInfo();
+        }};
+        
+        // Initialize export info
+        document.addEventListener('DOMContentLoaded', function() {{
+            updateExportInfo();
+        }});
     </script>
 </body>
 </html>
@@ -515,7 +742,7 @@ def _generate_summary_stats(trace_data: List[Dict[str, Any]], metadata: Dict[str
         percentage = (count / total_calls) * 100
         call_type_breakdown.append(f'{badge} {call_type}: {count:,} ({percentage:.1f}%)')
     
-    call_type_section = '\n'.join(call_type_breakdown)
+    call_type_section = '\n'.join(call_type_breakdown);
     
     summary_parts.append(f"""📊 Trace Statistics:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -748,14 +975,14 @@ def _format_arg_value_for_html(value) -> str:
     
     # For other objects, show type and try to get a useful representation
     try:
-        str_repr = str(value);
+        str_repr = str(value)
         if len(str_repr) > 50:
-            return f'&lt;{type(value).__name__} object&gt;';
+            return f'&lt;{type(value).__name__} object&gt;'
         else:
-            escaped = str_repr.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;');
-            return f'&lt;{escaped}&gt;';
+            escaped = str_repr.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            return f'&lt;{escaped}&gt;'
     except:
-        return f'&lt;{type(value).__name__} object&gt;';
+        return f'&lt;{type(value).__name__} object&gt;'
 
 def _get_arg_type_for_html(value) -> str:
     """Get the type name for an argument value."""
@@ -812,7 +1039,7 @@ def _get_call_type_badge(call_type: str) -> str:
         'unknown': '❓'
     }
     
-    color = type_colors.get(call_type, type_colors['unknown']);
-    symbol = type_symbols.get(call_type, type_symbols['unknown']);
+    color = type_colors.get(call_type, type_colors['unknown'])
+    symbol = type_symbols.get(call_type, type_symbols['unknown'])
     
-    return f'<span style="background: {color}; color: white; padding: 1px 4px; border-radius: 3px; font-size: 0.8em; margin-right: 4px;" title="{call_type}">{symbol}</span>'
+    return f'<span style="background: {color}; color: white; padding: 1px 4px; border-radius: 3px; font-size: 0.8em; margin-right: 4px;" title="{call_type}">{symbol}</span>';

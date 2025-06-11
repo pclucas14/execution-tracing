@@ -77,9 +77,61 @@ def clean_and_visualize_trace(trace_file, port, group_patterns):
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 super().end_headers()
             
+            def do_POST(self):
+                if self.path == '/save_filtered':
+                    try:
+                        content_length = int(self.headers['Content-Length'])
+                        post_data = self.rfile.read(content_length)
+                        data = json.loads(post_data.decode('utf-8'))
+                        
+                        filename = data['filename']
+                        filtered_data = data['data']
+                        directory = data['directory']
+                        
+                        # Validate filename (security check)
+                        if not filename or '..' in filename or '/' in filename:
+                            raise ValueError("Invalid filename")
+                        
+                        # Construct full path
+                        filepath = os.path.join(directory, filename)
+                        
+                        # Save the filtered data
+                        with open(filepath, 'w', encoding='utf-8') as f:
+                            json.dump(filtered_data, f, indent=2, default=str)
+                        
+                        # Send success response
+                        response = {
+                            'success': True,
+                            'filepath': filepath,
+                            'message': f'Filtered data saved to {filepath}'
+                        }
+                        
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps(response).encode('utf-8'))
+                        
+                        print(f"✓ Saved filtered data to: {filepath}")
+                        
+                    except Exception as e:
+                        print(f"✗ Error saving file: {e}")
+                        response = {
+                            'success': False,
+                            'error': str(e)
+                        }
+                        
+                        self.send_response(500)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps(response).encode('utf-8'))
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            
             def log_message(self, format, *args):
-                # Suppress access logs for cleaner output
-                pass
+                # Only log save operations, suppress access logs for cleaner output
+                if 'save_filtered' in str(args):
+                    print(f"Save request: {args}")
         
         with socketserver.TCPServer(("", port), CustomHandler) as httpd:
             filename = os.path.basename(html_file)
@@ -91,6 +143,7 @@ def clean_and_visualize_trace(trace_file, port, group_patterns):
             print(f"   • Pattern grouping: {'✓' if group_patterns else '✗'}")
             print(f"   • Import filtering: {'✓' if $HIDE_IMPORTS else '✗'}")
             print(f"   • Interactive filtering: ✓")
+            print(f"   • Server-side save: ✓")
             print(f"   • Nested pattern detection: ✓")
             print("\nPress Ctrl+C to stop the server...")
             
