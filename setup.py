@@ -9,6 +9,7 @@ setup(
     entry_points={
         'console_scripts': [
             'trace_program=cli.main:main',
+            'trace_pytest=cli.main:trace_pytest_main',
         ],
     },
     python_requires='>=3.6',

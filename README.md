@@ -12,7 +12,7 @@ pip install -e .
 
 ### Basic Usage
 
-There are two ways to run the tracer:
+There are three ways to run the tracer:
 
 #### Using the Python module
 ```bash
@@ -24,14 +24,43 @@ python -m cli.main <script_to_trace.py> [script_arguments...]
 trace_program <script_to_trace.py> [script_arguments...]
 ```
 
+#### Tracing pytest tests
+```bash
+trace_pytest [pytest arguments...] [-o OUTPUT] [--scope SCOPE] [--no-external-calls] [--no-imports]
+```
+
 ### Command Line Options
 
+#### trace_program
 - `script` - The Python script to trace (required)
 - `-o, --output` - Output file for trace results (optional, prints to stdout if not specified)
 - `--scope` - Directory path to restrict tracing to (optional, defaults to script directory)
 - `--no-external-calls` - Disable tracking of calls to functions outside the scope
+- `--no-imports` - Disable tracking of import related calls
 - `script_args` - Arguments to pass to the traced script (supports both positional and named arguments)
 
+#### trace_pytest
+- `pytest_args` - All pytest arguments (test files, options, etc.)
+- `-o, --output` - Output file for trace results (default: pytest_trace_output.json)
+- `--scope` - Directory path to restrict tracing to (optional, defaults to current directory)
+- `--no-external-calls` - Disable tracking of calls to functions outside the scope
+- `--no-imports` - Disable tracking of import related calls
+
+### Examples
+
+```bash
+# Trace a simple Python script
+trace_program my_script.py --arg1 value1 -o trace.json
+
+# Trace pytest tests
+trace_pytest tests/test_module.py -v -o pytest_trace.json
+
+# Trace all tests in a directory with custom scope
+trace_pytest tests/ --scope ./src -o full_test_trace.json
+
+# Trace specific test function
+trace_pytest tests/test_module.py::test_function -v --no-external-calls
+```
 
 ## Visualization
 

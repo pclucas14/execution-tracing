@@ -3,6 +3,66 @@ import os
 import argparse
 from tracer.core import start_tracing, stop_tracing
 
+def trace_pytest_main():
+    """Entry point for trace_pytest command."""
+    # Set up argument parser for pytest tracing
+    parser = argparse.ArgumentParser(
+        description='Trace pytest execution',
+        usage='trace_pytest [pytest args...] [-o OUTPUT] [--scope SCOPE] [--no-external-calls] [--no-imports]'
+    )
+    parser.add_argument('-o', '--output', 
+                       default='pytest_trace_output.json',
+                       help='Output file for trace results (default: pytest_trace_output.json)')
+    parser.add_argument('--scope', help='Directory path to restrict tracing to')
+    parser.add_argument('--no-external-calls', action='store_true', 
+                       help='Disable tracking of calls to functions outside the scope')
+    parser.add_argument('--no-imports', action='store_true', 
+                       help='Disable tracking of import related calls')
+    
+    # Parse known args, leaving pytest args for later
+    args, pytest_args = parser.parse_known_args()
+    
+    # Import pytest
+    try:
+        import pytest
+    except ImportError:
+        print("Error: pytest is not installed. Please install it with: pip install pytest")
+        sys.exit(1)
+    
+    # Determine tracing scope
+    scope_path = args.scope
+    if not scope_path:
+        # Default to current working directory
+        scope_path = os.getcwd()
+        print(f'No scope specified, using current directory: {scope_path}')
+    else:
+        scope_path = os.path.abspath(scope_path)
+        print(f'Scope path set to: {scope_path}')
+    
+    # Start tracing
+    print(f"Tracing pytest execution with args: {' '.join(pytest_args)}")
+    print(f"Tracing scope: {scope_path}")
+    print(f"Output file: {args.output}")
+    track_external = not args.no_external_calls
+    print(f"Track external calls: {track_external}")
+    
+    start_tracing(
+        scope_path=scope_path, 
+        main_file=None,  # No specific main file for pytest
+        track_external_calls=track_external, 
+        track_imports=not args.no_imports
+    )
+    
+    try:
+        # Run pytest with the provided arguments
+        exit_code = pytest.main(pytest_args)
+    finally:
+        # Stop tracing and output results
+        stop_tracing(args.output)
+    
+    # Exit with pytest's exit code
+    sys.exit(exit_code)
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Trace Python program execution')
