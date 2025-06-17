@@ -121,6 +121,7 @@ def main():
         # Stop tracing and output results
         stop_tracing(args.output)
 
+'''
 def run_tracer(args):
     """Run the tracer with the given arguments."""
     from tracer.core import start_tracing, stop_tracing
@@ -139,6 +140,29 @@ def run_tracer(args):
     # Stop tracing and save output
     output_file = getattr(args, 'output_file', None)
     return stop_tracing(output_file)
+'''
+
+def where_command():
+    from tracer.where import IterationBreakpointTracer
+    parser = argparse.ArgumentParser(description="Run a Python script and print stack trace at a breakpoint.")
+    parser.add_argument("--file", help="Target Python file to run")
+    parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    parser.add_argument("--output_file", type=str, help="File name to save the tracing output")
+    parser.add_argument("--line", type=int, help="Line number for the breakpoint")
+    parser.add_argument("--iterations", type=int, help="Number of times to hit the breakpoint before printing stack trace")
+    parser.add_argument('--args', nargs=argparse.REMAINDER, help='Arguments for the target script')
+    args = parser.parse_args()
+
+    filename = args.file
+    lineno = args.line
+    sys.argv = [filename] + (args.args if args.args is not None else [])
+    print("-"*40)
+    print(f"Running file [{filename}]. Setting breakpoint in line [{args.line}] for [{args.iterations}] iteration!")
+    print("-"*40)
+    tracer = IterationBreakpointTracer(filename, lineno, args.iterations, args.output_file, args.scope)
+    with open(filename, "rb") as fp:
+        code = compile(fp.read(), filename, 'exec')
+        tracer.run(code, globals(), globals())
 
 if __name__ == "__main__":
     main()
