@@ -162,7 +162,13 @@ def where_command():
     tracer = IterationBreakpointTracer(filename, lineno, args.iterations, args.output_file, args.scope)
     with open(filename, "rb") as fp:
         code = compile(fp.read(), filename, 'exec')
-        tracer.run(code, globals(), globals())
+        # Create proper execution environment with __name__ == "__main__"
+        exec_globals = {
+            '__name__': '__main__',
+            '__file__': filename,
+            '__builtins__': __builtins__,
+        }
+        tracer.run(code, exec_globals, exec_globals)
 
 if __name__ == "__main__":
     main()
