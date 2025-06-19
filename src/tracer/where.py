@@ -3,288 +3,255 @@ import sys
 import bdb
 import json
 import datetime
+import linecache
+import inspect
 
 class IterationBreakpointTracer(bdb.Bdb):
     def __init__(self, filename, lineno, max_hits, output_file, scope_dir=None):
         super().__init__()
-        self.filename = filename
+        self.filename = os.path.abspath(filename)
         self.lineno = lineno
         self.max_hits = max_hits
         self.hit_count = 0
         self.output_file = output_file 
         self.scope_dir = os.path.abspath(scope_dir) if scope_dir else None
-        self.traces = []
-        self.trace_data = []  # Store trace data in the new format
-        print(f"Scope dir - {self.scope_dir}")
-        self.set_break(filename, lineno)
+        self.stack_trace = []
+        self.original_command = ' '.join(sys.argv)
+        print(f"Setting breakpoint at {self.filename}:{self.lineno}")
+        print(f"Scope dir: {self.scope_dir}")
+        self.set_break(self.filename, lineno)
 
     def user_line(self, frame):
-        if (frame.f_code.co_filename == self.filename and
-                frame.f_lineno == self.lineno):
+        # Check if we've hit our breakpoint
+        filename = os.path.abspath(frame.f_code.co_filename)
+        if filename == self.filename and frame.f_lineno == self.lineno:
             self.hit_count += 1
-            stack_trace = self.collect_stack_trace(frame)
-            self.traces.append(stack_trace)  # Keep old format for backward compatibility
-            self.trace_data.extend(stack_trace)  # Add individual entries to new format
+            print(f"Hit breakpoint #{self.hit_count} at {self.filename}:{self.lineno}")
+            
             if self.hit_count == self.max_hits:
                 print(f"\nBreakpoint hit {self.max_hits} times at {self.filename}:{self.lineno}")
-                print("Stack trace (pdb where):")
-                self.print_stack_trace(frame)
-                self.save_traces()
+                self.stack_trace = self.collect_detailed_stack_trace(frame)
+                self.print_stack_trace()
+                self.save_trace()
                 sys.exit(0)
-        # Do not call super().user_line(frame) to avoid interactive mode
 
-    def collect_stack_trace(self, frame):
+    def collect_detailed_stack_trace(self, frame):
+        """Collect detailed information about each frame in the stack."""
         stack = []
         depth = 0
-        while frame:
-            code = frame.f_code
+        current_frame = frame
+        
+        while current_frame:
+            code = current_frame.f_code
             filename = os.path.abspath(code.co_filename)
-            print('filename', filename)
-            if self.scope_dir is None or filename.startswith(self.scope_dir):
-                # Convert to the new format matching trace_program/trace_pytest
-                relative_path = self._get_relative_path(filename)
-                location = f"{relative_path}:{frame.f_lineno}"
+            
+            # Check if we should include this frame based on scope
+            include_frame = True
+            if self.scope_dir:
+                include_frame = filename.startswith(self.scope_dir)
+            
+            if include_frame:
+                # Get the source line
+                line_content = linecache.getline(filename, current_frame.f_lineno).strip()
                 
-                # Get parent frame info
+                # Get parent information
+                parent_frame = current_frame.f_back
                 parent_location = None
                 parent_call = None
-                if frame.f_back:
-                    parent_code = frame.f_back.f_code
-                    parent_filename = os.path.abspath(parent_code.co_filename)
-                    if self.scope_dir is None or parent_filename.startswith(self.scope_dir):
-                        parent_relative_path = self._get_relative_path(parent_filename)
-                        parent_location = f"{parent_relative_path}:{frame.f_back.f_lineno}"
-                        parent_call = self._get_source_line(frame.f_back)
+                if parent_frame:
+                    parent_filename = os.path.abspath(parent_frame.f_code.co_filename)
+                    parent_lineno = parent_frame.f_lineno
+                    parent_location = f"{self._get_relative_path(parent_filename)}:{parent_lineno}"
+                    parent_call = linecache.getline(parent_filename, parent_lineno).strip()
                 
-                # Create trace entry in the new format
-                trace_entry = {
-                    "location": location,
+                # Extract ONLY the actual arguments passed to the function
+                args, kwargs = self._extract_actual_arguments(current_frame, code)
+                
+                # Determine call type
+                call_type = self._determine_call_type(code.co_name, line_content, current_frame)
+                
+                frame_info = {
+                    "location": f"{self._get_relative_path(filename)}:{current_frame.f_lineno}",
                     "parent_location": parent_location,
                     "parent_call": parent_call,
+                    "call": line_content,  # Add the current line being executed
                     "name": code.co_name,
-                    "arguments": self._get_function_args(frame),
+                    "arguments": {**args, **kwargs},  # Merge args and kwargs for backward compatibility
                     "depth": depth,
-                    "is_external": False,  # Within scope
-                    "call_type": self._classify_call_type(code.co_name, filename),
-                    "args": {},
-                    "kwargs": self._get_function_args(frame)
+                    "is_external": not filename.startswith(self.scope_dir) if self.scope_dir else False,
+                    "call_type": call_type,
+                    "args": args,
+                    "kwargs": kwargs
                 }
-                
-                stack.append(trace_entry)
+                stack.append(frame_info)
                 depth += 1
-            frame = frame.f_back
-        return list(reversed(stack))
-
-    def print_stack_trace(self, frame):
-        stack = []
-        while frame:
-            code = frame.f_code
-            filename = os.path.abspath(code.co_filename)
-            if self.scope_dir is None or filename.startswith(self.scope_dir):
-                # is the scope_dir is given, we restrict the stack to only the files within them
-                stack.append(frame)
-            frame = frame.f_back
-        print("\n======================================\n")
-        print("Stack trace:")
-        for f in reversed(stack):
-            code = f.f_code
-            print(f'  {code.co_filename}({f.f_lineno}): {code.co_name}')
-
-    def save_traces(self):
-        # Create the new format matching trace_program/trace_pytest
+            
+            current_frame = current_frame.f_back
         
-        # Construct the original command
-        original_command = f"{self.filename} --line {self.lineno} --iterations {self.max_hits}"
-        if self.scope_dir:
-            original_command += f" --scope {self.scope_dir}"
-        
-        output_data = {
-            "metadata": {
-                "original_command": original_command,
-                "scope_path": self.scope_dir or os.path.dirname(os.path.abspath(self.filename)),
-                "main_file": os.path.basename(self.filename),
-                "total_calls": len(self.trace_data),
-                "timestamp": datetime.datetime.now().isoformat(),
-                "breakpoint_file": self.filename,
-                "breakpoint_line": self.lineno,
-                "iterations_captured": self.hit_count,
-                "max_iterations": self.max_hits
-            },
-            "trace_data": self.trace_data
-        }
-        
-        with open(f"{self.output_file}.json", "w") as f:
-            json.dump(output_data, f, indent=2, default=str)
-        print(f"Done saving results in .. {self.output_file}.json")
+        # Return in order from deepest (breakpoint) to main
+        return stack
 
-    def run(self, *args, **kwargs):
-        """Run the code with the given arguments."""
-        return super().run(*args, **kwargs)
+    def _extract_actual_arguments(self, frame, code):
+        """Extract only the actual arguments passed to the function."""
+        args = {}
+        kwargs = {}
+        
+        try:
+            # Get the function's signature if possible
+            if code.co_name != '<module>':
+                # Get argument names from code object
+                argcount = code.co_argcount
+                kwonlyargcount = code.co_kwonlyargcount
+                varnames = code.co_varnames
+                
+                # Extract positional arguments
+                for i in range(argcount):
+                    arg_name = varnames[i]
+                    if arg_name in frame.f_locals:
+                        value = frame.f_locals[arg_name]
+                        # Skip 'self' and 'cls' unless it's the actual argument name
+                        if arg_name not in ('self', 'cls') or argcount == 1:
+                            args[arg_name] = self._serialize_value(value)
+                
+                # Extract keyword-only arguments
+                for i in range(argcount, argcount + kwonlyargcount):
+                    arg_name = varnames[i]
+                    if arg_name in frame.f_locals:
+                        kwargs[arg_name] = self._serialize_value(frame.f_locals[arg_name])
+                
+                # Check for *args and **kwargs
+                flags = code.co_flags
+                if flags & inspect.CO_VARARGS:  # Has *args
+                    varargs_index = argcount + kwonlyargcount
+                    if varargs_index < len(varnames):
+                        varargs_name = varnames[varargs_index]
+                        if varargs_name in frame.f_locals:
+                            args[f"*{varargs_name}"] = self._serialize_value(frame.f_locals[varargs_name])
+                
+                if flags & inspect.CO_VARKEYWORDS:  # Has **kwargs
+                    varkw_index = argcount + kwonlyargcount + (1 if flags & inspect.CO_VARARGS else 0)
+                    if varkw_index < len(varnames):
+                        varkw_name = varnames[varkw_index]
+                        if varkw_name in frame.f_locals:
+                            kwargs[f"**{varkw_name}"] = self._serialize_value(frame.f_locals[varkw_name])
+        except Exception:
+            # Fallback: just get what we can
+            pass
+        
+        return args, kwargs
+
+    def _serialize_value(self, value):
+        """Serialize a value for JSON output."""
+        try:
+            json.dumps(value)
+            return value
+        except:
+            # Convert to string representation if not JSON serializable
+            value_str = str(value)
+            if len(value_str) > 100:
+                return f"{type(value).__name__} object"
+            return value_str
+
+    def _determine_call_type(self, name, line_content, frame):
+        """Determine the type of call."""
+        if name == '<module>':
+            return 'module_execution'
+        elif name == '__init__':
+            return 'class_instantiation'
+        elif name.startswith('__') and name.endswith('__'):
+            return 'special_method' if name != '__call__' else 'callable_object'
+        elif line_content.startswith('class '):
+            return 'class_declaration'
+        elif 'self' in frame.f_locals:
+            return 'method'
+        else:
+            return 'function'
 
     def _get_relative_path(self, file_path):
-        """Convert an absolute file path to a relative path based on the scope."""
+        """Get relative path if within scope, otherwise just basename."""
         if not file_path:
             return "unknown"
         
-        # Handle special cases
-        if '<frozen' in file_path or file_path.startswith('<'):
-            return file_path
-        
-        # If we have a scope path, try to make the path relative to it
         if self.scope_dir and file_path.startswith(self.scope_dir):
-            # Remove the scope path prefix and any leading slash
-            relative_path = file_path[len(self.scope_dir):].lstrip(os.sep)
-            return relative_path if relative_path else os.path.basename(file_path)
-        
-        # For external files or files outside scope
-        return os.path.basename(file_path)
+            return os.path.relpath(file_path, self.scope_dir)
+        else:
+            return os.path.basename(file_path)
 
-    def _get_source_line(self, frame):
-        """Extract the source code line from a frame."""
-        if not frame:
-            return None
-            
-        try:
-            import linecache
-            filename = frame.f_code.co_filename
-            lineno = frame.f_lineno
-            
-            # Check for special cases where source is not available
-            if '<frozen' in filename:
-                return "<frozen module call>"
-            
-            if filename.startswith('<'):
-                return "<built-in or generated code>"
-            
-            # Get the line from the file
-            line = linecache.getline(filename, lineno)
-            if line:
-                # Strip whitespace and return the line
-                line = line.strip()
-                
-                # Limit length to avoid extremely long lines
-                if len(line) > 150:
-                    line = line[:147] + "..."
-                    
-                return line
-            else:
-                # If we can't read the line, provide a fallback
-                return f"<source unavailable: {os.path.basename(filename)}:{lineno}>"
-            
-        except Exception as e:
-            # If we can't get the source, return a descriptive error
-            return f"<source error: {str(e)}>"
-            
-        return None
+    def print_stack_trace(self):
+        """Print the stack trace in a readable format."""
+        print("\n" + "="*60)
+        print("Stack trace (from breakpoint to main):")
+        print("="*60)
+        for frame_info in self.stack_trace:
+            print(f"\nDepth {frame_info['depth']}: {frame_info['location']}")
+            print(f"  Function: {frame_info['name']}")
+            print(f"  Type: {frame_info['call_type']}")
+            print(f"  Current line: {frame_info['call']}")  # Add display of current line
+            if frame_info['parent_location']:
+                print(f"  Called from: {frame_info['parent_location']}")
+                print(f"  Call: {frame_info['parent_call']}")
+            if frame_info['args'] or frame_info['kwargs']:
+                print(f"  Arguments:")
+                if frame_info['args']:
+                    print(f"    args: {json.dumps(frame_info['args'], indent=6)}")
+                if frame_info['kwargs']:
+                    print(f"    kwargs: {json.dumps(frame_info['kwargs'], indent=6)}")
 
-    def _get_function_args(self, frame):
-        """Extract function arguments from frame."""
-        args = {}
-        try:
-            import inspect
-            # Get argument names and values  
-            arginfo = inspect.getargvalues(frame)
-            for arg_name in arginfo.args:
-                if arg_name in arginfo.locals:
-                    value = arginfo.locals[arg_name]
-                    args[arg_name] = self._format_value(value)
-                            
-            # Add varargs and kwargs if present
-            if arginfo.varargs and arginfo.varargs in arginfo.locals:
-                args['*' + arginfo.varargs] = self._format_value(arginfo.locals[arginfo.varargs])
-            if arginfo.keywords and arginfo.keywords in arginfo.locals:
-                args['**' + arginfo.keywords] = self._format_value(arginfo.locals[arginfo.keywords])
-                
-        except Exception:
-            args = {"error": "Could not extract arguments"}
+    def save_trace(self):
+        """Save the stack trace to a JSON file in standard format."""
+        output_filename = self.output_file
+        if not output_filename.endswith('.json'):
+            output_filename += '.json'
+        
+        # Get the line content at the breakpoint
+        breakpoint_line = linecache.getline(self.filename, self.lineno).strip()
+        
+        # Create output in standard format with metadata
+        output_data = {
+            "metadata": {
+                "original_command": self.original_command,
+                "breakpoint": f"{self.filename}:{self.lineno}",
+                "call": breakpoint_line,  # Add the actual line at the breakpoint
+                "iterations": self.max_hits,
+                "scope_path": self.scope_dir,
+                "total_frames": len(self.stack_trace),
+                "timestamp": datetime.datetime.now().isoformat()
+            },
+            "trace_data": self.stack_trace
+        }
             
-        return args
+        with open(output_filename, 'w') as f:
+            json.dump(output_data, f, indent=2, default=str)
+        print(f"\nStack trace saved to: {output_filename}")
 
-    def _format_value(self, value):
-        """Format a single value intelligently."""
-        try:
-            # Handle None
-            if value is None:
-                return None
-                
-            # Handle strings
-            if isinstance(value, str):
-                if len(value) > 100:
-                    return f"{value[:100]}..."
-                return value
-                
-            # Handle numbers and booleans
-            if isinstance(value, (int, float, bool)):
-                return value
-                
-            # Handle collections
-            if isinstance(value, (list, tuple)):
-                if len(value) == 0:
-                    return value
-                elif len(value) > 10:
-                    return f"{type(value).__name__} with {len(value)} items"
-                else:
-                    # Show first few items
-                    formatted_items = [self._format_value(item) for item in value[:3]]
-                    if len(value) > 3:
-                        formatted_items.append("...")
-                    return formatted_items
-                    
-            elif isinstance(value, dict):
-                if len(value) == 0:
-                    return value
-                elif len(value) > 5:
-                    return f"dict with {len(value)} keys"
-                else:
-                    # Show first few key-value pairs and ensure all keys are strings
-                    items = list(value.items())[:3]
-                    formatted_dict = {}
-                    for k, v in items:
-                        str_key = str(k) if k is not None else "None"
-                        formatted_dict[str_key] = self._format_value(v)
-                    if len(value) > 3:
-                        formatted_dict["...more"] = f"and {len(value) - 3} more"
-                    return formatted_dict
-                    
-            elif isinstance(value, set):
-                if len(value) == 0:
-                    return "set()"
-                elif len(value) > 5:
-                    return f"set with {len(value)} items"
-                else:
-                    return f"set({list(value)[:3]}{'...' if len(value) > 3 else ''})"
-                    
-            # Handle objects with useful string representations
-            else:
-                str_repr = str(value)
-                if len(str_repr) > 100:
-                    return f"{type(value).__name__} object"
-                return str_repr
-                
-        except Exception:
-            return f"{type(value).__name__} object"
-
-    def _classify_call_type(self, function_name, file_path):
-        """Classify the type of function call."""
-        # Check for module execution
-        if function_name == '<module>':
-            return "module_execution"
-        
-        # Check for class instantiation
-        if function_name == '__init__':
-            return "class_instantiation"
-        
-        # Check for special methods
-        if function_name.startswith('__') and function_name.endswith('__'):
-            return "special_method"
-        
-        # Check for lambda functions
-        if function_name == '<lambda>':
-            return "lambda_function"
-        
-        # Check for comprehensions
-        if function_name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
-            return "comprehension"
-        
-        # Default to function call
-        return "function_call"
+def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_dir, script_args):
+    """Main function to run the tracer."""
+    # Set up sys.argv for the target script
+    sys.argv = [script_path] + script_args
+    
+    # Create and run the tracer
+    tracer = IterationBreakpointTracer(
+        filename=breakpoint_file,
+        lineno=lineno,
+        max_hits=iterations,
+        output_file=output_file,
+        scope_dir=scope_dir
+    )
+    
+    # Add script directory to path
+    script_dir = os.path.dirname(os.path.abspath(script_path))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    
+    print(f"Running script: {script_path}")
+    print(f"With arguments: {script_args}")
+    
+    # Execute the script
+    with open(script_path, 'rb') as fp:
+        code = compile(fp.read(), script_path, 'exec')
+        exec_globals = {
+            '__name__': '__main__',
+            '__file__': script_path,
+            '__builtins__': __builtins__,
+        }
+        tracer.run(code, exec_globals, exec_globals)

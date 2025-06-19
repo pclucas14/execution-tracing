@@ -143,7 +143,7 @@ def run_tracer(args):
 '''
 
 def where_command():
-    from tracer.where import IterationBreakpointTracer
+    from tracer.where import main as where_main
     parser = argparse.ArgumentParser(
         description="Run a Python script and print stack trace at a breakpoint.",
         usage='trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]'
@@ -164,48 +164,39 @@ def where_command():
     # Parse known args to handle script arguments
     args, script_args = parser.parse_known_args()
     
-    # Set up the script to run
-    script_to_run = os.path.abspath(args.script)
-    
-    # Set up the breakpoint file
+    # Get absolute paths
+    script_path = os.path.abspath(args.script)
     breakpoint_file = os.path.abspath(args.file)
     
-    # Set up sys.argv for the target script
-    sys.argv = [script_to_run] + script_args
+    # Default output file if not specified
+    if not args.output_file:
+        output_file = f"trace_where_output_{os.path.basename(args.script).replace('.py', '')}"
+    else:
+        output_file = args.output_file
     
-    print("-"*40)
-    print(f"Running script: {script_to_run}")
-    print(f"Setting breakpoint in: {breakpoint_file}:{args.line}")
-    print(f"Will stop after {args.iterations} iterations")
+    # Resolve scope path
+    scope_path = None
     if args.scope:
-        print(f"Scope: {args.scope}")
-    print("-"*40)
+        scope_path = os.path.abspath(os.path.expanduser(args.scope))
     
-    # Create the tracer with the breakpoint file
-    tracer = IterationBreakpointTracer(
-        breakpoint_file, 
-        args.line, 
-        args.iterations, 
-        args.output_file or "trace_where_output", 
-        args.scope
+    print(f"Running trace_where:")
+    print(f"  Script: {script_path}")
+    print(f"  Breakpoint: {breakpoint_file}:{args.line}")
+    print(f"  Iterations: {args.iterations}")
+    print(f"  Output: {output_file}")
+    if scope_path:
+        print(f"  Scope: {scope_path}")
+    
+    # Run the tracer
+    where_main(
+        script_path=script_path,
+        breakpoint_file=breakpoint_file,
+        lineno=args.line,
+        iterations=args.iterations,
+        output_file=output_file,
+        scope_dir=scope_path,
+        script_args=script_args
     )
-    
-    # Run the script
-    with open(script_to_run, "rb") as fp:
-        code = compile(fp.read(), script_to_run, 'exec')
-        # Create proper execution environment with __name__ == "__main__"
-        exec_globals = {
-            '__name__': '__main__',
-            '__file__': script_to_run,
-            '__builtins__': __builtins__,
-        }
-        
-        # Add script directory to path to ensure imports work
-        script_dir = os.path.dirname(script_to_run)
-        if script_dir not in sys.path:
-            sys.path.insert(0, script_dir)
-            
-        tracer.run(code, exec_globals, exec_globals)
 
 if __name__ == "__main__":
     main()
