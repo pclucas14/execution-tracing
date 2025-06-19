@@ -144,30 +144,67 @@ def run_tracer(args):
 
 def where_command():
     from tracer.where import IterationBreakpointTracer
-    parser = argparse.ArgumentParser(description="Run a Python script and print stack trace at a breakpoint.")
-    parser.add_argument("--file", help="Target Python file to run")
+    parser = argparse.ArgumentParser(
+        description="Run a Python script and print stack trace at a breakpoint.",
+        usage='trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]'
+    )
+    
+    # Positional argument for the script to run
+    parser.add_argument("script", help="The Python script to run")
+    
+    # Required arguments for breakpoint
+    parser.add_argument("--file", required=True, help="Target file where to set the breakpoint")
+    parser.add_argument("--line", type=int, required=True, help="Line number for the breakpoint")
+    parser.add_argument("--iterations", type=int, required=True, help="Number of times to hit the breakpoint before printing stack trace")
+    
+    # Optional arguments
+    parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
     parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
-    parser.add_argument("--output_file", type=str, help="File name to save the tracing output")
-    parser.add_argument("--line", type=int, help="Line number for the breakpoint")
-    parser.add_argument("--iterations", type=int, help="Number of times to hit the breakpoint before printing stack trace")
-    parser.add_argument('--args', nargs=argparse.REMAINDER, help='Arguments for the target script')
-    args = parser.parse_args()
-
-    filename = args.file
-    lineno = args.line
-    sys.argv = [filename] + (args.args if args.args is not None else [])
+    
+    # Parse known args to handle script arguments
+    args, script_args = parser.parse_known_args()
+    
+    # Set up the script to run
+    script_to_run = os.path.abspath(args.script)
+    
+    # Set up the breakpoint file
+    breakpoint_file = os.path.abspath(args.file)
+    
+    # Set up sys.argv for the target script
+    sys.argv = [script_to_run] + script_args
+    
     print("-"*40)
-    print(f"Running file [{filename}]. Setting breakpoint in line [{args.line}] for [{args.iterations}] iteration!")
+    print(f"Running script: {script_to_run}")
+    print(f"Setting breakpoint in: {breakpoint_file}:{args.line}")
+    print(f"Will stop after {args.iterations} iterations")
+    if args.scope:
+        print(f"Scope: {args.scope}")
     print("-"*40)
-    tracer = IterationBreakpointTracer(filename, lineno, args.iterations, args.output_file, args.scope)
-    with open(filename, "rb") as fp:
-        code = compile(fp.read(), filename, 'exec')
+    
+    # Create the tracer with the breakpoint file
+    tracer = IterationBreakpointTracer(
+        breakpoint_file, 
+        args.line, 
+        args.iterations, 
+        args.output_file or "trace_where_output", 
+        args.scope
+    )
+    
+    # Run the script
+    with open(script_to_run, "rb") as fp:
+        code = compile(fp.read(), script_to_run, 'exec')
         # Create proper execution environment with __name__ == "__main__"
         exec_globals = {
             '__name__': '__main__',
-            '__file__': filename,
+            '__file__': script_to_run,
             '__builtins__': __builtins__,
         }
+        
+        # Add script directory to path to ensure imports work
+        script_dir = os.path.dirname(script_to_run)
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+            
         tracer.run(code, exec_globals, exec_globals)
 
 if __name__ == "__main__":

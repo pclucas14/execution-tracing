@@ -29,6 +29,11 @@ trace_program <script_to_trace.py> [script_arguments...]
 trace_pytest [pytest arguments...] [-o OUTPUT] [--scope SCOPE] [--no-external-calls] [--no-imports]
 ```
 
+#### Tracing to a specific breakpoint
+```bash
+trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]
+```
+
 ### Command Line Options
 
 #### trace_program
@@ -46,6 +51,15 @@ trace_pytest [pytest arguments...] [-o OUTPUT] [--scope SCOPE] [--no-external-ca
 - `--no-external-calls` - Disable tracking of calls to functions outside the scope
 - `--no-imports` - Disable tracking of import related calls
 
+#### trace_where
+- `script` - The Python script to run (required)
+- `--file` - File where to set the breakpoint (required)
+- `--line` - Line number for the breakpoint (required)
+- `--iterations` - Number of times to hit the breakpoint before capturing stack trace (required)
+- `-o, --output_file` - Output file for trace results (optional, defaults to trace_where_output.json)
+- `--scope` - Directory path to restrict tracing to (optional)
+- Script arguments are passed directly to the script being traced
+
 ### Examples
 
 ```bash
@@ -60,6 +74,9 @@ trace_pytest tests/ --scope ./src -o full_test_trace.json
 
 # Trace specific test function
 trace_pytest tests/test_module.py::test_function -v --no-external-calls
+
+# Trace to a specific breakpoint
+trace_where train_km_simple.py -c train/llama-ql-ddcd -k finetune_task_name=61430 --file utils/simple_utils.py --line 12 --iterations 1 -o breakpoint_trace.json --scope ~/msr_mttl/projects/kms
 ```
 
 ## Visualization

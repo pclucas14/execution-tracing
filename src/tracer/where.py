@@ -19,8 +19,6 @@ class IterationBreakpointTracer(bdb.Bdb):
         self.set_break(filename, lineno)
 
     def user_line(self, frame):
-        print('here', frame.f_code.co_filename, self.filename)
-        print(f'here 2 : {frame.f_lineno}, {self.lineno}')
         if (frame.f_code.co_filename == self.filename and
                 frame.f_lineno == self.lineno):
             self.hit_count += 1
