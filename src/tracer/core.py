@@ -640,8 +640,8 @@ def _trace_function(frame, event, arg):
             if not _tracer.track_imports and _tracer._is_import_call(func_name, file_path, caller_info):
                 return _trace_function if should_recurse else None
                 
-            # Skip special methods and common internals
-            if func_name.startswith('__') and func_name.endswith('__') and func_name != '__call__':
+            # Skip special methods and common internals, but keep __init__ and __call__
+            if func_name.startswith('__') and func_name.endswith('__') and func_name not in ('__call__', '__init__'):
                 return _trace_function if should_recurse else None
             if func_name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
                 return _trace_function if should_recurse else None
