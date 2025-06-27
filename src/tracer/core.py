@@ -36,6 +36,9 @@ class Tracer:
         
         # Store the original command
         self.original_command = ' '.join(sys.argv)
+        
+        # Add function call counter
+        self.function_call_counts = {}
 
         
     def start(self):
@@ -49,8 +52,26 @@ class Tracer:
         if not self.is_tracing:
             return
 
-        # Determine call type
+        # Determine call type first
         call_type = self._classify_call_type(function_name, file_path, caller_info, is_external, parent_call)
+
+        # Only track call counts for actual function/method calls
+        call_types_with_counts = {
+            'function_call', 'method', 'class_instantiation', 
+            'special_method', 'callable_object', 'lambda_function',
+            'external_call'
+        }
+        
+        current_call_number = None
+        if call_type in call_types_with_counts:
+            # Create a unique key for the function based on name and location
+            function_key = f"{function_name}@{file_path}:{line_number}"
+            
+            # Increment call count for this function
+            if function_key not in self.function_call_counts:
+                self.function_call_counts[function_key] = 0
+            self.function_call_counts[function_key] += 1
+            current_call_number = self.function_call_counts[function_key]
 
         # Prepare location info
         location = None
@@ -82,8 +103,13 @@ class Tracer:
             "is_external": is_external,
             "call_type": call_type,
             "args": {},
-            "kwargs": formatted_args
+            "kwargs": formatted_args,
         }
+        
+        # Only add number_of_calls if it's tracked for this call type
+        if current_call_number is not None:
+            entry["number_of_calls"] = current_call_number
+            
         self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
