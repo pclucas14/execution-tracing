@@ -168,14 +168,15 @@ class IterationBreakpointTracer(bdb.Bdb):
             return 'function'
 
     def _get_relative_path(self, file_path):
-        """Get relative path if within scope, otherwise just basename."""
+        """Get relative path if within scope, otherwise return absolute path."""
         if not file_path:
             return "unknown"
         
         if self.scope_dir and file_path.startswith(self.scope_dir):
             return os.path.relpath(file_path, self.scope_dir)
         else:
-            return os.path.basename(file_path)
+            # Return absolute path for files outside scope
+            return file_path
 
     def print_stack_trace(self):
         """Print the stack trace in a readable format."""

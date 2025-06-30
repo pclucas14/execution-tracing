@@ -76,10 +76,11 @@ class Tracer:
         # Prepare location info
         location = None
         if file_path and line_number:
-            relative_path = self._get_relative_path(file_path)
+            # For external calls, show absolute path
+            relative_path = self._get_relative_path(file_path, show_absolute_if_external=not is_external)
             location = f"{relative_path}:{line_number}"
         elif file_path:
-            relative_path = self._get_relative_path(file_path)
+            relative_path = self._get_relative_path(file_path, show_absolute_if_external=not is_external)
             location = relative_path
         else:
             location = "unknown"
@@ -503,7 +504,7 @@ class Tracer:
             'importlib' in (file_path or '')
         )
 
-    def _get_relative_path(self, file_path, show_absolute_if_external=True):
+    def _get_relative_path(self, file_path, show_absolute_if_external=False):
         """Convert an absolute file path to a relative path based on the scope."""
         if not file_path:
             return "unknown"
@@ -519,11 +520,12 @@ class Tracer:
             return relative_path if relative_path else os.path.basename(file_path)
         
         # For external files or files outside scope
-        if show_absolute_if_external and self.scope_path:
+        if show_absolute_if_external:
             # Return just the basename for cleaner output
             return os.path.basename(file_path)
         else:
-            return os.path.basename(file_path)
+            # Return the full absolute path
+            return file_path
 
     def _get_source_line(self, frame):
         """Extract the source code line(s) from a frame."""

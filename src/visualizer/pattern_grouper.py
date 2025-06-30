@@ -24,7 +24,7 @@ class PatternGrouper:
         """Create simplified representation of calls for pattern matching."""
         simplified = []
         for call in trace_data:
-            # Use function name + location as the pattern key
+            # Use function name + location (absolute or relative) as the pattern key
             key = f"{call.get('name', 'unknown')}@{call.get('location', 'unknown')}"
             simplified.append(key)
         return simplified

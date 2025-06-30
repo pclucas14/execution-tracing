@@ -19,7 +19,7 @@ class TraceVisualizer:
         call_index = 1
         
         for i, entry in enumerate(self.trace_data):
-            # Create a signature for the call based on function name and location only
+            # Create a signature for the call based on function name and absolute/relative location
             signature = self._get_call_signature_without_args(entry)
             
             if current_group and current_group['signature'] == signature:
