@@ -2,6 +2,7 @@ import sys
 import inspect
 import os
 import json
+from . import utils
 
 # Global tracer state
 _tracer = None
@@ -53,7 +54,7 @@ class Tracer:
             return
 
         # Determine call type first
-        call_type = self._classify_call_type(function_name, file_path, caller_info, is_external, parent_call)
+        call_type = utils.determine_call_type(function_name, file_path, caller_info, is_external, parent_call)
 
         # Only track call counts for actual function/method calls
         call_types_with_counts = {
@@ -77,10 +78,10 @@ class Tracer:
         location = None
         if file_path and line_number:
             # For external calls, show absolute path
-            relative_path = self._get_relative_path(file_path) #, show_absolute_if_external=not is_external)
+            relative_path = utils.get_relative_path(file_path, self.scope_path)
             location = f"{relative_path}:{line_number}"
         elif file_path:
-            relative_path = self._get_relative_path(file_path) #, show_absolute_if_external=not is_external)
+            relative_path = utils.get_relative_path(file_path, self.scope_path)
             location = relative_path
         else:
             location = "unknown"
@@ -88,11 +89,11 @@ class Tracer:
         # Prepare parent location - show absolute path if outside scope
         parent_location = None
         if caller_info and caller_info[0] and caller_info[1]:
-            relative_caller_path = self._get_relative_path(caller_info[0])
+            relative_caller_path = utils.get_relative_path(caller_info[0], self.scope_path)
             parent_location = f"{relative_caller_path}:{caller_info[1]}"
 
         # Format arguments intelligently
-        formatted_args = self._format_arguments(args)
+        formatted_args = utils.format_arguments(args)
 
         entry = {
             "location": location,
@@ -114,93 +115,16 @@ class Tracer:
         self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
-        """Deprecated: Use _determine_call_type instead."""
-        return self._determine_call_type(function_name, file_path, caller_info, is_external, parent_call)
+        """Deprecated: Use utils.determine_call_type instead."""
+        return utils.determine_call_type(function_name, file_path, caller_info, is_external, parent_call)
 
     def _determine_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None, frame=None):
         """Standardized method name for call type classification."""
-        # Check for import-related calls
-        if self._is_import_call(function_name, file_path, caller_info):
-            return "import"
-        
-        # Check for module execution
-        if function_name == '<module>':
-            if caller_info and caller_info[0] and '<frozen importlib' in caller_info[0]:
-                return "import"
-            return "module_execution"
-        
-        # Check for class declarations
-        if self._is_class_declaration(function_name, caller_info, parent_call):
-            return "class_declaration"
-        
-        # Check for class instantiation
-        if function_name == '__init__':
-            return "class_instantiation"
-        
-        # Check for special/dunder methods
-        if function_name.startswith('__') and function_name.endswith('__'):
-            if function_name == '__call__':
-                return "callable_object"
-            else:
-                return "special_method"
-        
-        # Check for lambda/anonymous functions
-        if function_name == '<lambda>':
-            return "lambda_function"
-        
-        # Check for comprehensions
-        if function_name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
-            return "comprehension"
-        
-        # Check for methods (if frame is provided)
-        if frame and 'self' in frame.f_locals:
-            return "method"
-        
-        # Classify based on external status
-        if is_external:
-            return "external_call"
-        
-        # Default to regular function call
-        return "function_call"
+        return utils.determine_call_type(function_name, file_path, caller_info, is_external, parent_call, frame)
 
     def _is_class_declaration(self, function_name, caller_info, parent_call=None):
         """Check if this is a class declaration (class definition) rather than instantiation."""
-        # Skip dunder methods and module-level code
-        if (function_name.startswith('__') and function_name.endswith('__')) or function_name == '<module>':
-            return False
-        
-        # Use the parent_call if it's provided (most reliable)
-        if parent_call:
-            # Look for patterns like "class ClassName:" or "class ClassName(Parent):"
-            import re
-            class_def_pattern = r'^\s*class\s+' + re.escape(function_name) + r'\s*[\(:]'
-            if re.match(class_def_pattern, parent_call.strip()):
-                return True
-                
-            # Also check for class definitions without the exact name match
-            # (in case of metaclass calls or inheritance)
-            if parent_call.strip().startswith('class ') and ':' in parent_call:
-                return True
-        
-        # Fallback: try to get parent call information from frame inspection if parent_call wasn't provided
-        if not parent_call and caller_info and len(caller_info) > 0:
-            try:
-                import sys
-                frame = sys._getframe(3)  # Go back to find the actual call frame
-                frame_parent_call = self._get_source_line(frame)
-                if frame_parent_call:
-                    import re
-                    class_def_pattern = r'^\s*class\s+' + re.escape(function_name) + r'\s*[\(:]'
-                    if re.match(class_def_pattern, frame_parent_call.strip()):
-                        return True
-                        
-                    # Also check for class definitions without the exact name match
-                    if frame_parent_call.strip().startswith('class ') and ':' in frame_parent_call:
-                        return True
-            except Exception:
-                pass
-        
-        return False
+        return utils.is_class_declaration(function_name, caller_info, parent_call)
 
     def get_trace_output(self):
         """Return the log as a JSON string with metadata."""
@@ -246,93 +170,15 @@ class Tracer:
     
     def _make_json_safe(self, obj):
         """Recursively make an object JSON-safe by converting problematic types."""
-        if obj is None or isinstance(obj, (str, int, float, bool)):
-            return obj
-        elif isinstance(obj, dict):
-            safe_dict = {}
-            for k, v in obj.items():
-                safe_dict[str(k)] = self._make_json_safe(v)
-            return safe_dict
-        elif isinstance(obj, (list, tuple)):
-            return [self._make_json_safe(item) for item in obj]
-        else:
-            return str(obj)
+        return utils.make_json_safe(obj)
 
     def _format_arguments(self, args):
         """Format arguments intelligently for logging."""
-        if not isinstance(args, dict):
-            return args
-            
-        formatted = {}
-        for key, value in args.items():
-            # Convert all keys to strings for JSON compatibility
-            str_key = str(key) if key is not None else "None"
-            formatted[str_key] = self._format_value(value)
-        return formatted
+        return utils.format_arguments(args)
     
     def _format_value(self, value):
         """Format a single value intelligently."""
-        try:
-            # Handle None
-            if value is None:
-                return None
-                
-            # Handle strings
-            if isinstance(value, str):
-                if len(value) > 100:
-                    return f"{value[:100]}..."  # 100 chars + "..." = 103 total
-                return value
-                
-            # Handle numbers and booleans
-            if isinstance(value, (int, float, bool)):
-                return value
-                
-            # Handle collections
-            if isinstance(value, (list, tuple)):
-                if len(value) == 0:
-                    return value
-                elif len(value) > 10:
-                    return f"{type(value).__name__} with {len(value)} items"
-                else:
-                    # Show first few items
-                    formatted_items = [self._format_value(item) for item in value[:3]]
-                    if len(value) > 3:
-                        formatted_items.append("...")
-                    return formatted_items
-                    
-            elif isinstance(value, dict):
-                if len(value) == 0:
-                    return value
-                elif len(value) > 5:
-                    return f"dict with {len(value)} keys"
-                else:
-                    # Show first few key-value pairs and ensure all keys are strings
-                    items = list(value.items())[:3]
-                    formatted_dict = {}
-                    for k, v in items:
-                        str_key = str(k) if k is not None else "None"
-                        formatted_dict[str_key] = self._format_value(v)
-                    if len(value) > 3:
-                        formatted_dict["...more"] = f"and {len(value) - 3} more"
-                    return formatted_dict
-                    
-            elif isinstance(value, set):
-                if len(value) == 0:
-                    return "set()"
-                elif len(value) > 5:
-                    return f"set with {len(value)} items"
-                else:
-                    return f"set({list(value)[:3]}{'...' if len(value) > 3 else ''})"
-                    
-            # Handle objects with useful string representations
-            else:
-                str_repr = str(value)
-                if len(str_repr) > 100:
-                    return f"{type(value).__name__} object"
-                return str_repr
-                
-        except Exception:
-            return f"{type(value).__name__} object"
+        return utils.format_value(value)
 
     def _should_trace(self, frame):
         """Determine if a frame should be traced based on scope and function name."""
@@ -498,93 +344,15 @@ class Tracer:
 
     def _is_import_call(self, function_name, file_path, caller_info):
         """Check if a function call is related to module importing."""
-        
-        # Get parent location for pattern matching
-        parent_location = ""
-        if caller_info and caller_info[0]:
-            parent_location = caller_info[0]
-        
-        # Check for common import patterns (same logic as visualization)
-        return (
-            '<frozen importlib._bootstrap>' in parent_location or
-            '<frozen importlib._bootstrap>' in (file_path or '') or
-            function_name == '<module>' or
-            'importlib' in (file_path or '')
-        )
+        return utils.is_import_call(function_name, file_path, caller_info)
 
     def _get_relative_path(self, file_path):
         """Get relative path if within scope, otherwise return absolute path."""
-        if not file_path:
-            return "unknown"
-        
-        if self.scope_path and file_path.startswith(self.scope_path):
-            return os.path.relpath(file_path, self.scope_path)
-        else:
-            # Return absolute path for files outside scope
-            return file_path
+        return utils.get_relative_path(file_path, self.scope_path)
 
     def _get_source_line(self, frame):
         """Extract the source code line(s) from a frame."""
-        if not frame:
-            return None
-            
-        try:
-            import linecache
-            filename = frame.f_code.co_filename
-            lineno = frame.f_lineno
-            
-            # Check for special cases where source is not available
-            if '<frozen' in filename:
-                return f"<frozen module call>"
-            
-            if filename.startswith('<'):
-                return f"<built-in or generated code>"
-            
-            # Get the line from the file
-            line = linecache.getline(filename, lineno)
-            if line:
-                # Strip whitespace and return the line
-                line = line.strip()
-                
-                # For multi-line calls, try to get additional context
-                # Check if the line looks incomplete (ends with comma, opening paren, etc.)
-                if line and (line.endswith(',') or line.endswith('(') or 
-                           line.count('(') > line.count(')') or
-                           line.count('[') > line.count(']') or
-                           line.count('{') > line.count('}')):
-                    # Try to get the next few lines to complete the call
-                    additional_lines = []
-                    for i in range(1, 4):  # Look ahead up to 3 lines
-                        next_line = linecache.getline(filename, lineno + i)
-                        if next_line:
-                            next_line = next_line.strip()
-                            additional_lines.append(next_line)
-                            # Stop if we seem to have completed the call
-                            combined = line + ' ' + ' '.join(additional_lines)
-                            if (combined.count('(') == combined.count(')') and
-                                combined.count('[') == combined.count(']') and
-                                combined.count('{') == combined.count('}')):
-                                break
-                        else:
-                            break
-                    
-                    if additional_lines:
-                        line = line + ' ' + ' '.join(additional_lines)
-                
-                # Limit length to avoid extremely long lines
-                if len(line) > 150:
-                    line = line[:147] + "..."
-                    
-                return line
-            else:
-                # If we can't read the line, provide a fallback
-                return f"<source unavailable: {os.path.basename(filename)}:{lineno}>"
-            
-        except Exception as e:
-            # If we can't get the source, return a descriptive error
-            return f"<source error: {str(e)}>"
-            
-        return None
+        return utils.get_source_line(frame)
 def _is_in_scope(file_path):
     """Check if a file is within the tracing scope."""
     global TRACER_SCOPE
@@ -662,7 +430,7 @@ def _trace_function(frame, event, arg):
                 return _trace_function if should_recurse else None
             
             # Check if this is an import call and skip if import tracking is disabled
-            if not _tracer.track_imports and _tracer._is_import_call(func_name, file_path, caller_info):
+            if not _tracer.track_imports and utils.is_import_call(func_name, file_path, caller_info):
                 return _trace_function if should_recurse else None
                 
             # Skip special methods and common internals, but keep __init__ and __call__
@@ -704,7 +472,7 @@ def _trace_function(frame, event, arg):
             # Get the parent call line
             parent_call = None
             if frame.f_back:
-                parent_call = _tracer._get_source_line(frame.f_back)
+                parent_call = utils.get_source_line(frame.f_back)
             
             # Log the call with proper depth, function name, arguments, and external status
             _tracer.log_function_call(

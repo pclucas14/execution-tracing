@@ -5,6 +5,7 @@ import json
 import datetime
 import linecache
 import inspect
+from tracer import utils
 
 class IterationBreakpointTracer(bdb.Bdb):
     def __init__(self, filename, lineno, max_hits, output_file, scope_path=None):  # Changed from scope_dir
@@ -47,7 +48,7 @@ class IterationBreakpointTracer(bdb.Bdb):
             
             # Check if we should include this frame based on scope
             include_frame = True
-            if self.scope_path:  # Changed from scope_dir
+            if self.scope_path:
                 include_frame = filename.startswith(self.scope_path)
             
             if include_frame:
@@ -61,20 +62,20 @@ class IterationBreakpointTracer(bdb.Bdb):
                 if parent_frame:
                     parent_filename = os.path.abspath(parent_frame.f_code.co_filename)
                     parent_lineno = parent_frame.f_lineno
-                    parent_location = f"{self._get_relative_path(parent_filename)}:{parent_lineno}"
+                    parent_location = f"{utils.get_relative_path(parent_filename, self.scope_path)}:{parent_lineno}"
                     parent_call = linecache.getline(parent_filename, parent_lineno).strip()
                 
                 # Extract ONLY the actual arguments passed to the function
                 args, kwargs = self._extract_actual_arguments(current_frame, code)
                 
                 # Determine call type using standardized method
-                call_type = self._determine_call_type(code.co_name, filename, 
+                call_type = utils.determine_call_type(code.co_name, filename, 
                                                      (parent_filename, parent_lineno) if parent_frame else None,
                                                      not filename.startswith(self.scope_path) if self.scope_path else False,
                                                      parent_call, current_frame)
                 
                 frame_info = {
-                    "location": f"{self._get_relative_path(filename)}:{current_frame.f_lineno}",
+                    "location": f"{utils.get_relative_path(filename, self.scope_path)}:{current_frame.f_lineno}",
                     "parent_location": parent_location,
                     "parent_call": parent_call,
                     "call": line_content,
@@ -114,13 +115,13 @@ class IterationBreakpointTracer(bdb.Bdb):
                         value = frame.f_locals[arg_name]
                         # Skip 'self' and 'cls' unless it's the actual argument name
                         if arg_name not in ('self', 'cls') or argcount == 1:
-                            args[arg_name] = self._serialize_value(value)
+                            args[arg_name] = utils.serialize_value(value)
                 
                 # Extract keyword-only arguments
                 for i in range(argcount, argcount + kwonlyargcount):
                     arg_name = varnames[i]
                     if arg_name in frame.f_locals:
-                        kwargs[arg_name] = self._serialize_value(frame.f_locals[arg_name])
+                        kwargs[arg_name] = utils.serialize_value(frame.f_locals[arg_name])
                 
                 # Check for *args and **kwargs
                 flags = code.co_flags
@@ -129,14 +130,14 @@ class IterationBreakpointTracer(bdb.Bdb):
                     if varargs_index < len(varnames):
                         varargs_name = varnames[varargs_index]
                         if varargs_name in frame.f_locals:
-                            args[f"*{varargs_name}"] = self._serialize_value(frame.f_locals[varargs_name])
+                            args[f"*{varargs_name}"] = utils.serialize_value(frame.f_locals[varargs_name])
                 
                 if flags & inspect.CO_VARKEYWORDS:  # Has **kwargs
                     varkw_index = argcount + kwonlyargcount + (1 if flags & inspect.CO_VARARGS else 0)
                     if varkw_index < len(varnames):
                         varkw_name = varnames[varkw_index]
                         if varkw_name in frame.f_locals:
-                            kwargs[f"**{varkw_name}"] = self._serialize_value(frame.f_locals[varkw_name])
+                            kwargs[f"**{varkw_name}"] = utils.serialize_value(frame.f_locals[varkw_name])
         except Exception:
             # Fallback: just get what we can
             pass
@@ -145,65 +146,15 @@ class IterationBreakpointTracer(bdb.Bdb):
 
     def _serialize_value(self, value):
         """Serialize a value for JSON output."""
-        try:
-            json.dumps(value)
-            return value
-        except:
-            # Convert to string representation if not JSON serializable
-            value_str = str(value)
-            if len(value_str) > 100:
-                return f"{type(value).__name__} object"
-            return value_str
+        return utils.serialize_value(value)
 
     def _determine_call_type(self, name, filename, caller_info, is_external, line_content, frame):
         """Standardized call type determination matching core.py logic."""
-        # Check for module execution
-        if name == '<module>':
-            if caller_info and caller_info[0] and '<frozen importlib' in caller_info[0]:
-                return "import"
-            return 'module_execution'
-        
-        # Check for class instantiation
-        elif name == '__init__':
-            return 'class_instantiation'
-        
-        # Check for special methods
-        elif name.startswith('__') and name.endswith('__'):
-            return 'special_method' if name != '__call__' else 'callable_object'
-        
-        # Check for class declaration
-        elif line_content and line_content.strip().startswith('class '):
-            return 'class_declaration'
-        
-        # Check for lambda
-        elif name == '<lambda>':
-            return 'lambda_function'
-        
-        # Check for comprehensions
-        elif name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
-            return 'comprehension'
-        
-        # Check for method
-        elif frame and 'self' in frame.f_locals:
-            return 'method'
-        
-        # Check for external
-        elif is_external:
-            return 'external_call'
-        
-        # Default
-        else:
-            return 'function_call'
+        return utils.determine_call_type(name, filename, caller_info, is_external, line_content, frame)
 
     def _get_relative_path(self, file_path):
         """Get relative path if within scope, otherwise return absolute path."""
-        if not file_path:
-            return "unknown"
-        
-        if self.scope_path and file_path.startswith(self.scope_path):  # Changed from scope_dir
-            return os.path.relpath(file_path, self.scope_path)
-        else:
-            return file_path
+        return utils.get_relative_path(file_path, self.scope_path)
 
     def print_stack_trace(self):
         """Print the stack trace in a readable format."""
