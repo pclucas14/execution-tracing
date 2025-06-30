@@ -7,18 +7,18 @@ import linecache
 import inspect
 
 class IterationBreakpointTracer(bdb.Bdb):
-    def __init__(self, filename, lineno, max_hits, output_file, scope_dir=None):
+    def __init__(self, filename, lineno, max_hits, output_file, scope_path=None):  # Changed from scope_dir
         super().__init__()
         self.filename = os.path.abspath(filename)
         self.lineno = lineno
         self.max_hits = max_hits
         self.hit_count = 0
         self.output_file = output_file 
-        self.scope_dir = os.path.abspath(scope_dir) if scope_dir else None
+        self.scope_path = os.path.abspath(scope_path) if scope_path else None  # Changed from scope_dir
         self.stack_trace = []
         self.original_command = ' '.join(sys.argv)
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
-        print(f"Scope dir: {self.scope_dir}")
+        print(f"Scope path: {self.scope_path}")  # Changed from scope_dir
         self.set_break(self.filename, lineno)
 
     def user_line(self, frame):
@@ -47,8 +47,8 @@ class IterationBreakpointTracer(bdb.Bdb):
             
             # Check if we should include this frame based on scope
             include_frame = True
-            if self.scope_dir:
-                include_frame = filename.startswith(self.scope_dir)
+            if self.scope_path:  # Changed from scope_dir
+                include_frame = filename.startswith(self.scope_path)
             
             if include_frame:
                 # Get the source line
@@ -67,18 +67,21 @@ class IterationBreakpointTracer(bdb.Bdb):
                 # Extract ONLY the actual arguments passed to the function
                 args, kwargs = self._extract_actual_arguments(current_frame, code)
                 
-                # Determine call type
-                call_type = self._determine_call_type(code.co_name, line_content, current_frame)
+                # Determine call type using standardized method
+                call_type = self._determine_call_type(code.co_name, filename, 
+                                                     (parent_filename, parent_lineno) if parent_frame else None,
+                                                     not filename.startswith(self.scope_path) if self.scope_path else False,
+                                                     parent_call, current_frame)
                 
                 frame_info = {
                     "location": f"{self._get_relative_path(filename)}:{current_frame.f_lineno}",
                     "parent_location": parent_location,
                     "parent_call": parent_call,
-                    "call": line_content,  # Add the current line being executed
+                    "call": line_content,
                     "name": code.co_name,
-                    "arguments": {**args, **kwargs},  # Merge args and kwargs for backward compatibility
+                    "arguments": {**args, **kwargs},
                     "depth": depth,
-                    "is_external": not filename.startswith(self.scope_dir) if self.scope_dir else False,
+                    "is_external": not filename.startswith(self.scope_path) if self.scope_path else False,
                     "call_type": call_type,
                     "args": args,
                     "kwargs": kwargs
@@ -152,30 +155,54 @@ class IterationBreakpointTracer(bdb.Bdb):
                 return f"{type(value).__name__} object"
             return value_str
 
-    def _determine_call_type(self, name, line_content, frame):
-        """Determine the type of call."""
+    def _determine_call_type(self, name, filename, caller_info, is_external, line_content, frame):
+        """Standardized call type determination matching core.py logic."""
+        # Check for module execution
         if name == '<module>':
+            if caller_info and caller_info[0] and '<frozen importlib' in caller_info[0]:
+                return "import"
             return 'module_execution'
+        
+        # Check for class instantiation
         elif name == '__init__':
             return 'class_instantiation'
+        
+        # Check for special methods
         elif name.startswith('__') and name.endswith('__'):
             return 'special_method' if name != '__call__' else 'callable_object'
-        elif line_content.startswith('class '):
+        
+        # Check for class declaration
+        elif line_content and line_content.strip().startswith('class '):
             return 'class_declaration'
-        elif 'self' in frame.f_locals:
+        
+        # Check for lambda
+        elif name == '<lambda>':
+            return 'lambda_function'
+        
+        # Check for comprehensions
+        elif name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
+            return 'comprehension'
+        
+        # Check for method
+        elif frame and 'self' in frame.f_locals:
             return 'method'
+        
+        # Check for external
+        elif is_external:
+            return 'external_call'
+        
+        # Default
         else:
-            return 'function'
+            return 'function_call'
 
     def _get_relative_path(self, file_path):
         """Get relative path if within scope, otherwise return absolute path."""
         if not file_path:
             return "unknown"
         
-        if self.scope_dir and file_path.startswith(self.scope_dir):
-            return os.path.relpath(file_path, self.scope_dir)
+        if self.scope_path and file_path.startswith(self.scope_path):  # Changed from scope_dir
+            return os.path.relpath(file_path, self.scope_path)
         else:
-            # Return absolute path for files outside scope
             return file_path
 
     def print_stack_trace(self):
@@ -212,10 +239,10 @@ class IterationBreakpointTracer(bdb.Bdb):
             "metadata": {
                 "original_command": self.original_command,
                 "breakpoint": f"{self.filename}:{self.lineno}",
-                "call": breakpoint_line,  # Add the actual line at the breakpoint
+                "call": breakpoint_line,
                 "iterations": self.max_hits,
-                "scope_path": self.scope_dir,
-                "total_frames": len(self.stack_trace),
+                "scope_path": self.scope_path,  # Changed from scope_dir
+                "total_frames": len(self.stack_trace),  # Keep as total_frames
                 "timestamp": datetime.datetime.now().isoformat()
             },
             "trace_data": self.stack_trace
@@ -225,7 +252,7 @@ class IterationBreakpointTracer(bdb.Bdb):
             json.dump(output_data, f, indent=2, default=str)
         print(f"\nStack trace saved to: {output_filename}")
 
-def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_dir, script_args):
+def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_path, script_args):  # Changed from scope_dir
     """Main function to run the tracer."""
     # Set up sys.argv for the target script
     sys.argv = [script_path] + script_args
@@ -236,7 +263,7 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_di
         lineno=lineno,
         max_hits=iterations,
         output_file=output_file,
-        scope_dir=scope_dir
+        scope_path=scope_path  # Changed from scope_dir
     )
     
     # Add script directory to path

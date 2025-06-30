@@ -13,7 +13,7 @@ class Tracer:
         self.is_tracing = False
         self.log = []  # Now a list of dicts for JSON output
         self.seen_functions = set()
-        self.scope_path = scope_path
+        self.scope_path = scope_path  # Keep as scope_path for consistency
         self.exclude_paths = exclude_paths or []
         self.output_file = output_file
         self.main_file = main_file or "train_km_simple.py"
@@ -114,19 +114,22 @@ class Tracer:
         self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
-        """Classify the type of function call."""
+        """Deprecated: Use _determine_call_type instead."""
+        return self._determine_call_type(function_name, file_path, caller_info, is_external, parent_call)
+
+    def _determine_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None, frame=None):
+        """Standardized method name for call type classification."""
         # Check for import-related calls
         if self._is_import_call(function_name, file_path, caller_info):
             return "import"
         
-        # Check for module execution - only if NOT called from importlib
+        # Check for module execution
         if function_name == '<module>':
-            # Check if this is being called from importlib (making it an import)
             if caller_info and caller_info[0] and '<frozen importlib' in caller_info[0]:
                 return "import"
             return "module_execution"
         
-        # Check for class declarations (class definitions, not instantiations)
+        # Check for class declarations
         if self._is_class_declaration(function_name, caller_info, parent_call):
             return "class_declaration"
         
@@ -145,9 +148,13 @@ class Tracer:
         if function_name == '<lambda>':
             return "lambda_function"
         
-        # Check for comprehensions (filtered out but classified for completeness)
+        # Check for comprehensions
         if function_name in ('<genexpr>', '<listcomp>', '<dictcomp>', '<setcomp>'):
             return "comprehension"
+        
+        # Check for methods (if frame is provided)
+        if frame and 'self' in frame.f_locals:
+            return "method"
         
         # Classify based on external status
         if is_external:
@@ -198,20 +205,21 @@ class Tracer:
     def get_trace_output(self):
         """Return the log as a JSON string with metadata."""
         try:
-            # For backward compatibility with tests expecting list format
-            if not self.scope_path and not self.main_file:
-                # Legacy format for tests
-                return json.dumps(self.log, indent=2, default=str)
+            # Standardized metadata structure
+            metadata = {
+                "original_command": self.original_command,
+                "scope_path": self.scope_path,  # Always use scope_path
+                "timestamp": __import__('datetime').datetime.now().isoformat()
+            }
             
-            # New format with metadata
+            # Add optional fields if they exist
+            if hasattr(self, 'main_file') and self.main_file:
+                metadata["main_file"] = self.main_file
+            
+            metadata["total_frames"] = len(self.log)  # Use total_frames for consistency
+            
             output_data = {
-                "metadata": {
-                    "original_command": self.original_command,
-                    "scope_path": self.scope_path,
-                    "main_file": self.main_file,
-                    "total_calls": len(self.log),
-                    "timestamp": __import__('datetime').datetime.now().isoformat()
-                },
+                "metadata": metadata,
                 "trace_data": self.log
             }
             return json.dumps(output_data, indent=2, default=str)

@@ -194,7 +194,7 @@ def where_command():
         lineno=args.line,
         iterations=args.iterations,
         output_file=output_file,
-        scope_dir=scope_path,
+        scope_path=scope_path,  # Changed from scope_dir
         script_args=script_args
     )
 
