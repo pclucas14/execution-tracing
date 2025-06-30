@@ -77,10 +77,10 @@ class Tracer:
         location = None
         if file_path and line_number:
             # For external calls, show absolute path
-            relative_path = self._get_relative_path(file_path, show_absolute_if_external=not is_external)
+            relative_path = self._get_relative_path(file_path) #, show_absolute_if_external=not is_external)
             location = f"{relative_path}:{line_number}"
         elif file_path:
-            relative_path = self._get_relative_path(file_path, show_absolute_if_external=not is_external)
+            relative_path = self._get_relative_path(file_path) #, show_absolute_if_external=not is_external)
             location = relative_path
         else:
             location = "unknown"
@@ -504,27 +504,15 @@ class Tracer:
             'importlib' in (file_path or '')
         )
 
-    def _get_relative_path(self, file_path, show_absolute_if_external=False):
-        """Convert an absolute file path to a relative path based on the scope."""
+    def _get_relative_path(self, file_path):
+        """Get relative path if within scope, otherwise return absolute path."""
         if not file_path:
             return "unknown"
         
-        # Handle special cases
-        if '<frozen' in file_path or file_path.startswith('<'):
-            return file_path
-        
-        # If we have a scope path, try to make the path relative to it
         if self.scope_path and file_path.startswith(self.scope_path):
-            # Remove the scope path prefix and any leading slash
-            relative_path = file_path[len(self.scope_path):].lstrip(os.sep)
-            return relative_path if relative_path else os.path.basename(file_path)
-        
-        # For external files or files outside scope
-        if show_absolute_if_external:
-            # Return just the basename for cleaner output
-            return os.path.basename(file_path)
+            return os.path.relpath(file_path, self.scope_path)
         else:
-            # Return the full absolute path
+            # Return absolute path for files outside scope
             return file_path
 
     def _get_source_line(self, frame):
