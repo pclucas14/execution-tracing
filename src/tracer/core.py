@@ -16,7 +16,7 @@ class Tracer:
         self.scope_path = scope_path  # Keep as scope_path for consistency
         self.exclude_paths = exclude_paths or []
         self.output_file = output_file
-        self.main_file = main_file or "train_km_simple.py"
+        self.main_file = main_file
         self.call_stack = []  # Track the full call stack
         self.in_scope_depth = 0  # Track depth within our scope
         self.scope_entered = False  # Track if we've entered our scope
@@ -630,7 +630,8 @@ def _trace_function(frame, event, arg):
             caller_info = _get_caller_info(frame)
             
             # Track if we're entering the main file
-            if not _tracer.scope_entered and _tracer.main_file in file_path:
+            entering = _is_in_scope(file_path) if _tracer.main_file is None else _tracer.main_file in file_path
+            if not _tracer.scope_entered and entering:
                 _tracer.scope_entered = True
                 _tracer.in_scope_depth = 0
                 if _tracer.debug:
