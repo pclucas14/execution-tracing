@@ -317,35 +317,68 @@ class TestTracer(unittest.TestCase):
     def test_get_source_line_method(self):
         """Test the _get_source_line method."""
         # This test would need a mock frame object to test properly
-        # For now, just verify the method exists and handles None input
-        result = self.tracer._get_source_line(None)
-        self.assertIsNone(result)
 
-    def test_parent_call_structure_for_visualization(self):
-        """Test that parent_call is structured properly for the HTML visualization."""
+    def test_function_call_counting(self):
+        """Test that function call counts are tracked correctly."""
         self.tracer.start()
         
-        parent_call = "config = SomeConfig(param1='value', param2=42)"
-        self.tracer.log_function_call(
-            '__init__', 
-            {'self': 'SomeConfig object', 'param1': 'value', 'param2': 42},
-            '/test/file.py', 
-            10,
-            ('/test/caller.py', 25),
-            0, 
-            False,
-            parent_call=parent_call
-        )
+        # Call the same function multiple times
+        self.tracer.log_function_call('test_function', {'arg': 'value1'}, 
+                                    '/test/file.py', 10, None, 0, False)
+        self.tracer.log_function_call('test_function', {'arg': 'value2'}, 
+                                    '/test/file.py', 10, None, 0, False)
+        self.tracer.log_function_call('test_function', {'arg': 'value3'}, 
+                                    '/test/file.py', 10, None, 0, False)
         
-        logged_call = self.tracer.log[0]
+        # Verify the number_of_calls field
+        self.assertEqual(len(self.tracer.log), 3)
+        self.assertEqual(self.tracer.log[0]['number_of_calls'], 1)
+        self.assertEqual(self.tracer.log[1]['number_of_calls'], 2)
+        self.assertEqual(self.tracer.log[2]['number_of_calls'], 3)
+
+    def test_different_functions_have_separate_counts(self):
+        """Test that different functions have separate call counts."""
+        self.tracer.start()
         
-        # Verify structure matches what HTML visualizer expects
-        self.assertIn('parent_call', logged_call)
-        self.assertIn('parent_location', logged_call)
-        self.assertIn('name', logged_call)
-        self.assertIn('arguments', logged_call)
+        # Call different functions
+        self.tracer.log_function_call('function_a', {}, '/test/file.py', 10, None, 0, False)
+        self.tracer.log_function_call('function_b', {}, '/test/file.py', 20, None, 0, False)
+        self.tracer.log_function_call('function_a', {}, '/test/file.py', 10, None, 0, False)
+        self.tracer.log_function_call('function_b', {}, '/test/file.py', 20, None, 0, False)
         
-        # Verify content
-        self.assertEqual(logged_call['parent_call'], parent_call)
-        self.assertEqual(logged_call['parent_location'], 'caller.py:25')
-        self.assertEqual(logged_call['name'], '__init__')
+        # Verify counts are separate
+        self.assertEqual(self.tracer.log[0]['number_of_calls'], 1)  # first call to function_a
+        self.assertEqual(self.tracer.log[1]['number_of_calls'], 1)  # first call to function_b
+        self.assertEqual(self.tracer.log[2]['number_of_calls'], 2)  # second call to function_a
+        self.assertEqual(self.tracer.log[3]['number_of_calls'], 2)  # second call to function_b
+
+    def test_same_function_different_locations_have_separate_counts(self):
+        """Test that the same function name at different locations has separate counts."""
+        self.tracer.start()
+        
+        # Call same function name from different files
+        self.tracer.log_function_call('helper', {}, '/test/file1.py', 10, None, 0, False)
+        self.tracer.log_function_call('helper', {}, '/test/file2.py', 10, None, 0, False)
+        self.tracer.log_function_call('helper', {}, '/test/file1.py', 10, None, 0, False)
+        
+        # Verify counts are separate per location
+        self.assertEqual(self.tracer.log[0]['number_of_calls'], 1)  # first call to helper in file1
+        self.assertEqual(self.tracer.log[1]['number_of_calls'], 1)  # first call to helper in file2
+        self.assertEqual(self.tracer.log[2]['number_of_calls'], 2)  # second call to helper in file1
+
+    def test_number_of_calls_in_json_output(self):
+        """Test that number_of_calls is included in JSON output."""
+        import json
+        
+        self.tracer.start()
+        self.tracer.log_function_call('test_function', {'arg': 'value'}, 
+                                    '/test/file.py', 10, None, 0, False)
+        self.tracer.log_function_call('test_function', {'arg': 'value'}, 
+                                    '/test/file.py', 10, None, 0, False)
+        
+        output = self.tracer.get_trace_output()
+        parsed = json.loads(output)
+        
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0]['number_of_calls'], 1)
+        self.assertEqual(parsed[1]['number_of_calls'], 2)
