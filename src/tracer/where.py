@@ -8,16 +8,18 @@ import inspect
 from tracer import utils
 
 class IterationBreakpointTracer(bdb.Bdb):
-    def __init__(self, filename, lineno, max_hits, output_file, scope_path=None):  # Changed from scope_dir
+    def __init__(self, filename, lineno, max_hits, output_file, scope_path):  # Changed from scope_dir
         super().__init__()
         self.filename = os.path.abspath(filename)
         self.lineno = lineno
         self.max_hits = max_hits
         self.hit_count = 0
         self.output_file = output_file 
-        self.scope_path = os.path.abspath(scope_path) if scope_path else None  # Changed from scope_dir
+        self.scope_path = os.path.abspath(scope_path)
         self.stack_trace = []
         self.original_command = ' '.join(sys.argv)
+
+        assert self.scope_path, "Scope path must be provided"
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
         print(f"Scope path: {self.scope_path}")  # Changed from scope_dir
         self.set_break(self.filename, lineno)
@@ -39,58 +41,61 @@ class IterationBreakpointTracer(bdb.Bdb):
     def collect_detailed_stack_trace(self, frame):
         """Collect detailed information about each frame in the stack."""
         stack = []
-        depth = 0
         current_frame = frame
         
+        # First pass: collect all frames
+        frames_to_process = []
         while current_frame:
+            # Check if we should include this frame based on scope
+            filename = os.path.abspath(current_frame.f_code.co_filename)
+            if filename.startswith(self.scope_path): 
+                frames_to_process.append(current_frame)
+
+            current_frame = current_frame.f_back
+        
+        # Calculate maximum depth (total frames - 1)
+        max_depth = len(frames_to_process) - 1
+        print(f'Total frames in stack: {len(frames_to_process)} (max depth: {max_depth})')
+
+        # Second pass: process frames with reversed depth
+        for idx, current_frame in enumerate(frames_to_process):
             code = current_frame.f_code
             filename = os.path.abspath(code.co_filename)
+            line_content = linecache.getline(filename, current_frame.f_lineno).strip()
             
-            # Check if we should include this frame based on scope
-            include_frame = True
-            if self.scope_path:
-                include_frame = filename.startswith(self.scope_path)
+            # Get parent information
+            parent_frame = current_frame.f_back
+            parent_location = None
+            parent_call = None
+            if parent_frame:
+                parent_filename = os.path.abspath(parent_frame.f_code.co_filename)
+                parent_lineno = parent_frame.f_lineno
+                parent_location = f"{utils.get_relative_path(parent_filename, self.scope_path)}:{parent_lineno}"
+                parent_call = linecache.getline(parent_filename, parent_lineno).strip()
             
-            if include_frame:
-                # Get the source line
-                line_content = linecache.getline(filename, current_frame.f_lineno).strip()
-                
-                # Get parent information
-                parent_frame = current_frame.f_back
-                parent_location = None
-                parent_call = None
-                if parent_frame:
-                    parent_filename = os.path.abspath(parent_frame.f_code.co_filename)
-                    parent_lineno = parent_frame.f_lineno
-                    parent_location = f"{utils.get_relative_path(parent_filename, self.scope_path)}:{parent_lineno}"
-                    parent_call = linecache.getline(parent_filename, parent_lineno).strip()
-                
-                # Extract ONLY the actual arguments passed to the function
-                args, kwargs = self._extract_actual_arguments(current_frame, code)
-                
-                # Determine call type using standardized method
-                call_type = utils.determine_call_type(code.co_name, filename, 
-                                                     (parent_filename, parent_lineno) if parent_frame else None,
-                                                     not filename.startswith(self.scope_path) if self.scope_path else False,
-                                                     parent_call, current_frame)
-                
-                frame_info = {
-                    "location": f"{utils.get_relative_path(filename, self.scope_path)}:{current_frame.f_lineno}",
-                    "parent_location": parent_location,
-                    "parent_call": parent_call,
-                    "call": line_content,
-                    "name": code.co_name,
-                    "arguments": {**args, **kwargs},
-                    "depth": depth,
-                    "is_external": not filename.startswith(self.scope_path) if self.scope_path else False,
-                    "call_type": call_type,
-                    "args": args,
-                    "kwargs": kwargs
-                }
-                stack.append(frame_info)
-                depth += 1
+            # Extract ONLY the actual arguments passed to the function
+            args, kwargs = self._extract_actual_arguments(current_frame, code)
             
-            current_frame = current_frame.f_back
+            # Determine call type using standardized method
+            call_type = utils.determine_call_type(code.co_name, filename, 
+                                                    (parent_filename, parent_lineno) if parent_frame else None,
+                                                    not filename.startswith(self.scope_path) if self.scope_path else False,
+                                                    parent_call, current_frame)
+            
+            frame_info = {
+                "location": f"{utils.get_relative_path(filename, self.scope_path)}:{current_frame.f_lineno}",
+                "parent_location": parent_location,
+                "parent_call": parent_call,
+                "call": line_content,
+                "name": code.co_name,
+                "arguments": {**args, **kwargs},
+                "depth": max_depth - idx,  # Reverse the depth
+                "is_external": not filename.startswith(self.scope_path) if self.scope_path else False,
+                "call_type": call_type,
+                "args": args,
+                "kwargs": kwargs
+            }
+            stack.append(frame_info)
         
         # Return in order from deepest (breakpoint) to main
         return stack
