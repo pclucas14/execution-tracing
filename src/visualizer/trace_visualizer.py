@@ -19,7 +19,7 @@ class TraceVisualizer:
         call_index = 1
         
         for i, entry in enumerate(self.trace_data):
-            # Create a signature for the call based on function name and location only
+            # Create a signature for the call based on function name and absolute/relative location
             signature = self._get_call_signature_without_args(entry)
             
             if current_group and current_group['signature'] == signature:
@@ -110,10 +110,16 @@ class TraceVisualizer:
             
             # Build the line with depth information
             depth_str = f"[depth:{depth}] "
+            
+            # Add call count information if available
+            call_count_str = ""
+            if 'number_of_calls' in entry:
+                call_count_str = f"[call #{entry['number_of_calls']}] "
+            
             if count > 1:
-                line = f"{call_number_str}{depth_str}{indent}{name}({args}) [{location}] x {count} times"
+                line = f"{call_number_str}{depth_str}{call_count_str}{indent}{name}({args}) [{location}] x {count} times"
             else:
-                line = f"{call_number_str}{depth_str}{indent}{name}({args}) [{location}]"
+                line = f"{call_number_str}{depth_str}{call_count_str}{indent}{name}({args}) [{location}]"
             
             if is_external:
                 line += " [EXTERNAL]"
@@ -155,8 +161,12 @@ class TraceVisualizer:
         
         # Count calls per function
         function_counts = defaultdict(int)
+        max_call_count = 0
         for entry in self.trace_data:
             function_counts[entry.get('name', 'unknown')] += 1
+            # Track maximum call count seen
+            if 'number_of_calls' in entry:
+                max_call_count = max(max_call_count, entry['number_of_calls'])
         
         # Find most called functions
         most_called = sorted(function_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -167,6 +177,8 @@ class TraceVisualizer:
         output.append(f"Maximum call depth: {stats['max_depth']}")
         output.append(f"External calls: {stats['external_calls']}")
         output.append(f"Files touched: {stats['files_touched']}")
+        if max_call_count > 0:
+            output.append(f"Maximum call count for a single function: {max_call_count}")
         output.append("\nMost called functions:")
         for func, count in most_called:
             output.append(f"  - {func}: {count} times")

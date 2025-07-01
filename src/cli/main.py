@@ -121,6 +121,7 @@ def main():
         # Stop tracing and output results
         stop_tracing(args.output)
 
+'''
 def run_tracer(args):
     """Run the tracer with the given arguments."""
     from tracer.core import start_tracing, stop_tracing
@@ -139,6 +140,63 @@ def run_tracer(args):
     # Stop tracing and save output
     output_file = getattr(args, 'output_file', None)
     return stop_tracing(output_file)
+'''
+
+def where_command():
+    from tracer.where import main as where_main
+    parser = argparse.ArgumentParser(
+        description="Run a Python script and print stack trace at a breakpoint.",
+        usage='trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]'
+    )
+    
+    # Positional argument for the script to run
+    parser.add_argument("script", help="The Python script to run")
+    
+    # Required arguments for breakpoint
+    parser.add_argument("--file", required=True, help="Target file where to set the breakpoint")
+    parser.add_argument("--line", type=int, required=True, help="Line number for the breakpoint")
+    parser.add_argument("--iterations", type=int, required=True, help="Number of times to hit the breakpoint before printing stack trace")
+    
+    # Optional arguments
+    parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
+    parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    
+    # Parse known args to handle script arguments
+    args, script_args = parser.parse_known_args()
+    
+    # Get absolute paths
+    script_path = os.path.abspath(args.script)
+    breakpoint_file = os.path.abspath(args.file)
+    
+    # Default output file if not specified
+    if not args.output_file:
+        output_file = f"trace_where_output_{os.path.basename(args.script).replace('.py', '')}"
+    else:
+        output_file = args.output_file
+    
+    # Resolve scope path
+    scope_path = None
+    if args.scope:
+        scope_path = os.path.abspath(os.path.expanduser(args.scope))
+    
+    print(f"Running trace_where:")
+    print(f"  Script: {script_path}")
+    print(f"  Breakpoint: {breakpoint_file}:{args.line}")
+    print(f"  Iterations: {args.iterations}")
+    print(f"  Output: {output_file}")
+    if scope_path:
+        print(f"  Scope: {scope_path}")
+    
+    # Run the tracer
+    where_main(
+        script_path=script_path,
+        breakpoint_file=breakpoint_file,
+        lineno=args.line,
+        iterations=args.iterations,
+        output_file=output_file,
+        scope_path=scope_path,  # Changed from scope_dir
+        script_args=script_args
+    )
 
 if __name__ == "__main__":
     main()
