@@ -5,8 +5,121 @@ import site
 import numpy as np
 import networkx as nx
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+from typing import Any, Dict, List, Optional
 
+@dataclass
+class TraceStep: 
+    # Stores minimal information about a "step" in the trace
+    # Akin to hitting a breakpoint
+    location: Optional[str] = None
+    name: Optional[str] = None
+    call_type: Optional[str] = None
+    is_external: bool = False
+
+    def __eq__(self, other):
+        if not isinstance(other, TraceStep):
+            return False
+        # Compare only the basic fields, not circular references
+        return (self.location == other.location and 
+                self.name == other.name and 
+                self.call_type == other.call_type and
+                self.is_external == other.is_external)
+
+    def is_callable(self):
+        return self.call_type not in ['import', 'class_declaration', 'external_call']
+
+    def __str__(self):
+        return f"TraceStep(location={self.location}, name={self.name}, call_type={self.call_type})"
+    
+    @classmethod
+    def from_str(cls, trace_str: str):
+        """
+        Initialize from a string representation of the trace step.
+        Expected format: "TraceStep(location: <location>, name: <name>, call_type: <call_type>)"
+        """
+        match = re.match(r'TraceStep\(location=(.*?), name=(.*?), call_type=(.*?)\)', trace_str)
+        if match:
+            location, name, call_type = match.groups()
+            return cls(location=location.strip(), name=name.strip(), call_type=call_type.strip())
+        else:
+            raise ValueError(f"Invalid trace step format: {trace_str}")
+
+@dataclass
+class MetaTraceStep(TraceStep):
+    # Store meta information about the "breakpoint" being hit
+    parent_location: Optional[str] = None
+    parent_call: Optional[str] = None
+
+    arguments: Dict[str, Any] = field(default_factory=dict)
+    depth: Optional[int] = None
+    number_of_calls: Optional[int] = None
+    is_first_call: bool = False
+    is_last_call: bool = False
+
+    def to_dict(self):
+        return {
+            'location': self.location,
+            'parent_location': self.parent_location,
+            'parent_call': self.parent_call,
+            'name': self.name,
+            'arguments': self.arguments,
+            'depth': self.depth,
+            'is_external': self.is_external,
+            'call_type': self.call_type,
+            'number_of_calls': self.number_of_calls,
+            'args': self.args,
+            'kwargs': self.kwargs,
+            'is_first_call': self.is_first_call,
+            'is_last_call': self.is_last_call
+        }
+
+@dataclass 
+class StepNode(MetaTraceStep):
+    previous_node: Optional['StepNode'] = None
+    up_node: Optional['StepNode'] = None
+    
+    def __init__(self, **kwargs):
+        # Extract node references to avoid including them in setattr
+        self.previous_node = kwargs.pop('previous_node', None)
+        self.up_node = kwargs.pop('up_node', None)
+        # Set all other fields
+        for f in fields(self):
+            if f.name not in ('previous_node', 'up_node'):
+                setattr(self, f.name, kwargs.get(f.name, f.default))
+    
+    def __repr__(self):
+        # Avoid recursion by not including circular references
+        return f"StepNode(location={self.location}, name={self.name}, depth={self.depth})"
+    
+    def __str__(self):
+        # Avoid recursion by not including circular references
+        return f"StepNode(location={self.location}, name={self.name}, depth={self.depth})"
+
+    @property
+    def stack_trace(self):
+        """
+        Returns the stack trace as a list of StepNode objects.
+        """
+        trace = []
+        current_node = self
+        while current_node:
+            trace.append(current_node)
+            current_node = current_node.up_node
+        return trace # [::-1]
+
+@dataclass
+class WhereEntry:
+    # Structure to store the output of a Where Command, along with alternative paths from the same start and end node
+    stack_trace: list[StepNode] = field(default_factory=list)
+    alternate_paths: list[StepNode] = field(default_factory=list)
+
+    def to_dict(self):
+        return {
+            'stack_trace': [entry.to_dict() for entry in self.stack_trace],
+            'alternate_paths': [[entry.to_dict() for entry in path] for path in self.alternate_paths]
+        }
+'''
 class TraceEntry:
     def __init__(
         self,
@@ -46,8 +159,37 @@ class WhereEntry:
     # Structure to store the output of a Where Command, along with alternative paths from the same start and end node
     stack_trace: list[TraceEntry] = field(default_factory=list)
     alternate_paths: list[TraceEntry] = field(default_factory=list)
+'''
+    
+def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> list[StepNode]:
+    """
+    Convert raw trace data to a list of StepNode objects.
+    """
+    previous_node = None
+    trace_data = []
 
-def get_stack_trace(traces: list[TraceEntry], entry_idx: int) -> list[TraceEntry]:
+    # To keep track of the previous "depth" node, let's keep track of the latest node 
+    # at each depth
+    depths = {}
+
+    for entry in raw_trace_data:
+        previous_depth_node = depths.get(entry.get('depth', 0) - 1)
+
+        node = StepNode(**entry, 
+                        previous_node=previous_node, 
+                        up_node=previous_depth_node)
+
+        trace_data.append(node)
+
+        # Update the previous node
+        previous_node = node
+
+        # Update the latest node at this depth
+        depths[node.depth] = node
+
+    return trace_data
+
+def get_stack_trace(traces: list[MetaTraceStep], entry_idx: int) -> list[MetaTraceStep]:
     stack_trace = []
     current_entry = traces[entry_idx]
     current_depth = current_entry.depth
@@ -94,6 +236,7 @@ def build_stack_trace_graph(stack_traces, G=None):
             parent = stack_trace[i]
             child = stack_trace[i + 1]
             # G.add_edge(parent['location'], child['location'])
+            breakpoint()
             G.add_edge(child.location, parent.location)
     return G
 
@@ -179,9 +322,17 @@ def extract_callables(traces, include_external_calls=True):
 def cluster_by_call_type(traces):
     call_type_clusters = defaultdict(list)
     for i, trace in enumerate(traces):
-        call_type_clusters[trace.call_type].append(i)
-    
+        call_type_clusters[trace.call_type].append(trace)
+
     return call_type_clusters
+
+def cluster_by_location(traces):
+    location_clusters = defaultdict(list)
+    for i, trace in enumerate(traces):
+        if trace.location:
+            location_clusters[trace.location].append(trace)
+    
+    return location_clusters
 
 def show(traces, line_no):
     pp(get_stack_trace(traces, line_no))
@@ -214,7 +365,7 @@ def get_where_entries(stack_traces, G):
         if len(paths) < args.min_path_amt: 
             print(f'Skipping entry {entry_idx} as it has only {len(paths)} path(s)')
             continue
-        
+
         # Create a WhereEntry object
         where_entry = WhereEntry(
             stack_trace=stack_trace,
@@ -309,14 +460,17 @@ if __name__ == '__main__':
         print(f'Processing trace file: {trace_file}')
         with open(trace_file, 'r') as f:
             traces = json.load(f)
-            metadata, trace_data = traces['metadata'], traces['trace_data']
+            metadata, raw_trace_data = traces['metadata'], traces['trace_data']
 
-        # convert to TraceEntry objects
-        trace_data = [TraceEntry(**entry) for entry in trace_data]
+        # convert to MetaTraceStep objects
+        trace_data = build_runtime_trace(raw_trace_data)
+        # trace_data = [TraceEntry(**entry) for entry in raw_trace_data]
 
+        breakpoint()
         ok_idx = mark_first_and_last_calls(trace_data, include_external_calls=False)
         print(f'Found {len(ok_idx)} callable entries in the trace data.')
         call_types = cluster_by_call_type(trace_data)
+        locations = cluster_by_location(trace_data)
         show(trace_data, ok_idx[-100])
 
         stack_traces = get_stack_traces(trace_data, ok_idx)
@@ -352,6 +506,10 @@ if __name__ == '__main__':
         print(np.bincount([len(entry.alternate_paths) for entry in where_entries.values()]))
 
         assert all(is_distinct_paths(entry.alternate_paths) for entry in where_entries.values()), "There are non-distinct paths in the where entries."
+
+        # Finally, let's save as a dataset we can use Later. 
+        breakpoint()
+        where_traces = [x.to_dict() for x in where_entries.values()]
 
         external_packages = find_all_external_packages(trace_data)
         cycles = detect_cycles(G)
