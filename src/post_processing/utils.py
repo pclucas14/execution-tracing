@@ -1,4 +1,3 @@
-import json 
 import site
 import random
 from dataclasses import dataclass, field
@@ -132,6 +131,23 @@ class StepNode:
     def __str__(self):
         # Avoid recursion by not including circular references
         return f"StepNode(location={self.location}, name={self.name}, depth={self.depth}), call_type={self.call_type}, is_external={self.is_external}, arguments={self.arguments})"
+
+    def to_dict(self):
+        """
+        Convert StepNode to dictionary for serialization.
+        Avoids circular references by only including essential data.
+        """
+        return {
+            'location': self.location,
+            'name': self.name,
+            'call_type': self.call_type,
+            'is_external': self.is_external,
+            'arguments': self.arguments,
+            'depth': self.depth,
+            'number_of_calls': self.number_of_calls,
+            'parent_location': self.parent_location,
+            'parent_call': self.parent_call
+        }
 
     @property
     def stack_trace(self):
@@ -312,85 +328,3 @@ def remove_nested_stack_traces(stack_traces):
             unique_stack_traces[idx] = stack_trace
     
     return unique_stack_traces
-
-if __name__ == '__main__':
-    # argparse, with arg --trace_files, array of string paths to files
-    import argparse
-    parser = argparse.ArgumentParser(description='Process some trace files.')
-    parser.add_argument('--trace_files', nargs='+', required=True, help='List of trace files to process')
-    parser.add_argument('--min_path_amt', type=int, default=4, help='Number of total paths to minimally have for where entry')
-    parser.add_argument('--max_siblings', type=int, default=100, help='Maximum number of leaf nodes per parent node')
-    parser.add_argument('--leafs_only', action='store_true', help='If set, only leaf nodes will be considered')
-    args = parser.parse_args()
-
-    G = None
-    start_nodes = []
-    for trace_file in args.trace_files:
-        print(f'Processing trace file: {trace_file}')
-        with open(trace_file, 'r') as f:
-            traces = json.load(f)
-            metadata, raw_trace_data = traces['metadata'], traces['trace_data']
-
-        start_node = build_runtime_trace(raw_trace_data)
-        start_nodes.append(start_node)
-
-        runtime_traces = start_node.runtime_trace
-
-        # First, we filter out nodes with insufficient alternate paths from root to said node
-        # filtered_nodes = [node for node in runtime_traces if len(find_paths(start_node, node)) >= args.min_path_amt]
-
-        # Once we have the runtime traces, let's filter out to select only :
-        # 1) the first calls to a given StepLocation
-        # 2) the last calls to a given StepLocation 
-
-        filtered_nodes = [node for node in runtime_traces if node.is_first_call or node.is_last_call]
-        filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
-        filtered_nodes = [node for node in filtered_nodes if len(find_paths(start_node, node)) >= args.min_path_amt]
-        print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls with at least {args.min_path_amt} paths.')
-        
-        # 3) are leaf nodes 
-        # 4) potentially restrict the amount of sibling nodes
-        if args.leafs_only:
-            parents_to_leaf_nodes = list(set([
-                node.up_node for node in filtered_nodes if node.is_leaf_node and node.up_node is not None
-            ]))
-            subsampled_leaf_nodes = []
-            for parent in parents_to_leaf_nodes:
-                leaf_nodes = [child for child in parent.down_nodes if child.is_leaf_node and not child.is_external]
-                if len(leaf_nodes) > args.max_siblings:
-                    leaf_nodes = random.sample(leaf_nodes, args.max_siblings)
-                subsampled_leaf_nodes.extend(leaf_nodes)
-
-            filtered_nodes = subsampled_leaf_nodes
-        else:
-            # We consider all nodes, but remove a node if it appears in another node's trace
-            filtered_nodes = [
-                node for node in filtered_nodes if not any(
-                    other_node != node and node.step_location in other_node.step_location.references
-                    for other_node in filtered_nodes
-                )
-            ]
-
-        # Finally, build the where entries
-        where_entries = []
-
-        for node in filtered_nodes:
-            # Get the stack trace for this node
-            stack_trace = node.stack_trace
-            paths = find_paths(start_node, node)
-            alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
-            assert len(alternate_paths) + 1 == len(paths), "The number of alternate paths should be one less than the total paths."
-            where_entry = WhereEntry(
-                stack_trace=stack_trace,
-                alternate_paths=alternate_paths
-            )
-            where_entries.append(where_entry)
-
-        assert all(is_distinct_paths(entry.alternate_paths) for entry in where_entries), "There are non-distinct paths in the where entries."
-
-        # Finally, let's save as a dataset we can use Later. 
-        # where_traces = [x.to_dict() for x in where_entries.values()]
-
-        external_packages = find_all_external_packages(runtime_traces)
-        breakpoint()
-        xx = 1  
