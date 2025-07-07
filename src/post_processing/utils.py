@@ -1,20 +1,33 @@
+import json
 import site
 import random
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-@dataclass
 class StepLocation: 
     # Stores minimal information about a "step" in the trace
     # It's basically a line in the code + how it's being used (e.g. function call, import, etc.)
-    location: Optional[str] = None
-    name: Optional[str] = None
-    call_type: Optional[str] = None
-    is_external: bool = False
-    references: List["StepNode"] = field(default_factory=list)
-
+    
     # Class-level registry to store unique instances
-    _registry: Dict[tuple, "StepLocation"] = field(default_factory=dict, init=False, repr=False)
+    _registry: Dict[tuple, "StepLocation"] = {}
+
+    def __init__(self, location=None, name=None, call_type=None, is_external=False):
+        # Only initialize if this is a new instance (not from registry)
+        if not hasattr(self, '_initialized'):
+            self.location = location
+            self.name = name
+            self.call_type = call_type
+            self.is_external = is_external
+            self.references = []
+            self._initialized = True
+
+    # method to clear the registry, useful for testing or resetting state
+    @classmethod
+    def clear_registry(cls):
+        """
+        Clear the registry of StepLocation instances.
+        This is useful for testing or resetting state.
+        """
+        cls._registry = {}
 
     def __new__(cls, location=None, name=None, call_type=None, is_external=False):
         # Ensure the registry exists at class level
@@ -47,6 +60,9 @@ class StepLocation:
 
     def __str__(self):
         return f"StepLocation(location={self.location}, name={self.name}, call_type={self.call_type})"
+
+    def __repr__(self):
+        return f"StepLocation(location={self.location}, name={self.name}, call_type={self.call_type}, is_external={self.is_external})"
     
 class StepNode:
     # Where in the code ?
@@ -124,6 +140,27 @@ class StepNode:
     def is_leaf_node(self):
         return len(self.down_nodes) == 0
 
+    @property
+    def root(self):
+        """
+        Returns the root node of the trace.
+        """
+        current_node = self
+        while current_node.previous_node:
+            current_node = current_node.previous_node
+        return current_node
+
+    @property
+    def upest_node(self):
+        """
+        Returns the upest node of the trace.
+        This is the node that is the furthest up in the trace.
+        """
+        current_node = self
+        while current_node.up_node:
+            current_node = current_node.up_node
+        return current_node
+
     def __repr__(self):
         # Avoid recursion by not including circular references
         return f"StepNode(location={self.location}, name={self.name}, depth={self.depth}), call_type={self.call_type}, is_external={self.is_external}, arguments={self.arguments})"
@@ -162,6 +199,28 @@ class StepNode:
         return trace[::-1]
 
     @property
+    def where(self):
+        # Like stack_trace, but returns in a format analogous to the `where` command in a debugger.
+        # Namely, 1) 1 node deeper because "root".parent_location is also added
+        # Use `child.parent_location` instead of self.location -> this is aligned with pdb where
+        # For the last node, we increment the line number by 1 (as if we set a breakpoint on the next line)
+        def increment_by_one(loc):
+            if loc:
+                parts = loc.rsplit(":", 1)
+                if len(parts) > 1:
+                    return f"{parts[0]}:{int(parts[1]) + 1}"
+                else:
+                    return loc
+            return None
+
+        trace = [increment_by_one(self.location)]
+        current_node = self
+        while current_node:
+            trace.append(current_node.parent_location)
+            current_node = current_node.up_node
+        return trace[::-1][1:]
+
+    @property
     def runtime_trace(self):
         """
         Lazily compute the runtime trace.
@@ -172,9 +231,20 @@ class StepNode:
             while current_node:
                 trace.append(current_node)
                 current_node = current_node.next_node
-            self._runtime_trace = trace[::-1] 
-
+            self._runtime_trace = trace[::-1]
         return self._runtime_trace
+
+    @property
+    def past(self):
+        """
+        Returns the past nodes in the trace, starting from the root node.
+        """
+        past_nodes = []
+        current_node = self
+        while current_node:
+            past_nodes.append(current_node)
+            current_node = current_node.previous_node
+        return past_nodes[::-1]
 
     @property
     def leaf_nodes(self):
@@ -192,16 +262,18 @@ class StepNode:
 
         return self._leaf_nodes
 
-@dataclass
 class WhereEntry:
     # Structure to store the output of a Where Command, along with alternative paths from the same start and end node
-    stack_trace: list[StepNode] = field(default_factory=list)
-    alternate_paths: list[StepNode] = field(default_factory=list)
+    def __init__(self, stack_trace=None, alternate_paths=None, command=None):
+        self.stack_trace = stack_trace if stack_trace is not None else []
+        self.alternate_paths = alternate_paths if alternate_paths is not None else []
+        self.command = command
 
     def to_dict(self):
         return {
             'stack_trace': [entry.to_dict() for entry in self.stack_trace],
-            'alternate_paths': [[entry.to_dict() for entry in path] for path in self.alternate_paths]
+            'alternate_paths': [[entry.to_dict() for entry in path] for path in self.alternate_paths],
+            "command": self.command
         }
     
 def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
@@ -221,6 +293,8 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
                         previous_node=previous_node, 
                         up_node=previous_depth_node)
 
+        print(node.name)
+        print(f'Length of registry: {len(StepLocation._registry)}')
         # Update the previous node
         if not previous_node:
             root_node = node
@@ -328,3 +402,33 @@ def remove_nested_stack_traces(stack_traces):
             unique_stack_traces[idx] = stack_trace
     
     return unique_stack_traces
+
+
+def read_jsonl_file(file_path):
+    """
+    Reads a JSONL file and returns a list of dictionaries.
+    
+    Args:
+        file_path (str): The path to the JSONL file.
+        
+    Returns:
+        list: A list of dictionaries containing the data from the JSONL file.
+    """
+    data = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            data.append(json.loads(line.strip()))
+    return data
+
+def read_json_file(path):
+    """
+    Reads a JSON file and returns its content.
+    
+    Args:
+        path (str): The path to the JSON file.
+        
+    Returns:
+        dict: The content of the JSON file.
+    """
+    with open(path, 'r') as f:
+        return json.load(f)
