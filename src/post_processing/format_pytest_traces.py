@@ -4,7 +4,7 @@ import sys
 import os
 import numpy as np
 
-from post_processing.utils import build_runtime_trace, find_paths, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node
 
 def get_repo_url(image_name):
     image_name = image_name.split('swesmith.x86_64.')[1].split(':')[0]
@@ -68,7 +68,8 @@ if __name__ == '__main__':
 
             print(f'Total number of StepLocation entries {len(StepLocation._registry)}')
 
-    for i in range(len(STUFF['start_node'])):
+        # for i in range(len(STUFF['start_node'])):
+        i = len(STUFF['start_node']) - 1  # Process the last trace in the list
 
         start_node = STUFF['start_node'][i]
         trace = STUFF['processed_trace'][i]
@@ -95,7 +96,7 @@ if __name__ == '__main__':
         filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
         # n_paths = [len(find_all_paths_to_node(node, start_nodes=[start_node])) for node in filtered_nodes]
         # filtered_nodes = [node for node in filtered_nodes if len(find_paths(node.upest_node, node)) >= args.min_path_amt]
-        print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls with at least {args.min_path_amt} paths.')
+        print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls') # with at least {args.min_path_amt} paths.')
 
         # 3) are leaf nodes 
         # 4) potentially restrict the amount of sibling nodes
@@ -120,6 +121,7 @@ if __name__ == '__main__':
                 )
             ]
 
+        print(f'Found {len(filtered_nodes)} nodes after filtering for leaf nodes and max siblings ({args.max_siblings}).')
         # Finally, build the where entries
         where_entries = []
 
@@ -129,7 +131,10 @@ if __name__ == '__main__':
 
             assert stack_trace[-1] == node
 
-            paths = find_all_paths_to_node(stack_trace[-1], start_nodes=[start_node]) #start_node, node)
+            breakpoint()
+            paths = find_all_paths_to_node(stack_trace[-1], expand=False) #start_node, node)
+            if len(paths) < args.min_path_amt: 
+                paths = find_all_paths_to_node(stack_trace[-1], expand=True) #start_node, node)
             alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
             if len(paths) < args.min_path_amt:
                 print(f'Node {node} has only {len(paths)} paths, skipping it.')

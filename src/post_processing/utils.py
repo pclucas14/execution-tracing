@@ -384,10 +384,13 @@ def find_paths(end_node):
 
     return list(unique_paths.values())
 
-def find_all_paths_to_node(end_node, start_nodes=None):
+def find_all_paths_to_node(end_node, expand=False):
     """
     Find all paths from any root node to the given end_node.
     A root node is defined as a node with no up_node (i.e., up_node is None).
+    
+    This function works backwards from the end_node to find all possible paths,
+    which is much more efficient than expanding the entire tree from all roots.
     
     Args:
         end_node: The target StepNode to find paths to
@@ -397,20 +400,42 @@ def find_all_paths_to_node(end_node, start_nodes=None):
     """
     all_paths = []
     
-    def find_paths_from_node(current_node, target_node, visited=None):
+    def find_paths_from_node(target_node, visited=None, expand=False):
         """
-        Find all paths from current_node to target_node using DFS.
+        Find all paths from any root node to target_node by working backwards from the target.
+        Much more efficient than expanding the entire tree from roots.
         """
         if visited is None:
             visited = set()
         
         # Add current node to visited set (using step_location for cycle detection)
-        visited.add(str(current_node.step_location))
+        visited.add(str(target_node.step_location))
         
-        # Base case: we reached the target
-        if current_node.step_location == target_node.step_location:
-            return [[current_node]]
+        # Base case: we reached a root node (no up_node)
+        if target_node.up_node is None:
+            return [[target_node]]
         
+        # Recursive case: explore all parent nodes (up_nodes) through siblings
+        paths = []
+        
+        # Get all siblings that share the same step_location as the target's up_node
+        up_node = target_node.up_node
+        if expand: 
+            up_nodes = [sibling.up_node for sibling in target_node.step_location.references if sibling.up_node is not None]
+        else:
+            up_nodes = [sibling for sibling in up_node.step_location.references if sibling is not None]
+        for up_node in up_nodes:
+            # for sibling in up_node.step_location.references:
+            #     # Avoid cycles by checking if we've already visited this step_location
+            if str(up_node.step_location) not in visited:
+                # Find all paths from root to this sibling
+                parent_paths = find_paths_from_node(up_node, visited.copy(), expand=expand)
+                # Append current target node to each path found
+                for path in parent_paths:
+                    paths.append(path + [target_node])
+
+        """
+        (OLD CODE)
         # Recursive case: explore all down_nodes
         paths = []
         # for child in current_node.down_nodes:
@@ -422,42 +447,12 @@ def find_all_paths_to_node(end_node, start_nodes=None):
                 # Prepend current node to each path found
                 for path in child_paths:
                     paths.append([current_node] + path)
-        
+        """
+
         return paths
     
-    # Find all root nodes (nodes with no up_node)
-    def find_root_nodes(node):
-        """Find all root nodes by traversing up and across the graph."""
-        roots = set()
-        visited = set()
-        
-        def traverse_to_roots(current):
-            if current in visited:
-                return
-            visited.add(str(current))
-            
-            # If no up_node, this is a root
-            if current.up_node is None:
-                roots.add(current)
-            else:
-                # Continue traversing up
-                traverse_to_roots(current.up_node)
-            
-            # Also check siblings (other references of the same step_location)
-            for sibling in current.step_location.references:
-                if str(sibling) not in visited:
-                    traverse_to_roots(sibling)
-        
-        traverse_to_roots(node)
-        return roots
-    
-    # Find all root nodes
-    root_nodes = start_nodes or find_root_nodes(end_node)
-
-    # Find paths from each root to the end_node
-    for root in root_nodes:
-        paths = find_paths_from_node(root, end_node)
-        all_paths.extend(paths)
+    # Find all paths from root nodes to the end_node by working backwards
+    all_paths = find_paths_from_node(end_node, expand=expand)
     
     return all_paths
 
