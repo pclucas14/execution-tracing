@@ -293,8 +293,6 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
                         previous_node=previous_node, 
                         up_node=previous_depth_node)
 
-        print(node.name)
-        print(f'Length of registry: {len(StepLocation._registry)}')
         # Update the previous node
         if not previous_node:
             root_node = node
@@ -325,6 +323,7 @@ def pp(stack_trace):
             print(f"Number of Calls: {entry.number_of_calls}")
         print("-" * 40)
 
+'''
 # for a given node in the graph, compute the list of paths to another node. If cycle exists, mark it.
 def find_paths(start_node, end_node):
     """Find all paths from start_node to end_node in the graph G."""
@@ -340,6 +339,41 @@ def find_paths(start_node, end_node):
                 path.pop()
 
     dfs(start_node, [start_node])
+'''
+
+def find_paths(end_node):
+    # Now that we are using the proper format for the `where` output, we don't need the start 
+    # nodes to match. We can simply find all paths to the end_node.
+    paths = []
+    def recurse(current_node, path):
+        # This function takes in a path from end_node to current_node. It will explore all
+        # possible paths to the end_node by following the down_nodes.
+        # it returns all paths from the end_node to neighbors of current_node (if not already in path)
+        # terminate when current_node has no up_node
+        if current_node is None:
+            # We reached the root node, add the path to the paths list
+            # path.insert(0, current_node)
+            paths.append(path.copy())
+            return
+
+        # if it's not none, we can continue
+
+        # NOTE: we know current_node has an up_node, safe to use parent_location ? 
+        # Iterate through all down nodes of the current node
+        for sibling in current_node.step_location.references:
+            parent = sibling.up_node
+
+            # If the neighbor is not already in the path, we can explore it
+            if sibling.step_location not in [x.step_location for x in path]:
+                # Add the neighbor to the path
+                path.insert(0, sibling)
+                # Recurse into the neighbor
+                recurse(parent, path)
+                # Backtrack by removing the first node from the path
+                # (we are using insert(0, ...) to build the path from end_node to start_node)
+                path.pop(0)
+
+    recurse(end_node, [])
 
     # We want to make sure that the StepLocation paths are unique, NOT JUST the StepNode paths
     random.shuffle(paths)
@@ -349,6 +383,84 @@ def find_paths(start_node, end_node):
         unique_paths['-'.join(to_sequence(path))] = path
 
     return list(unique_paths.values())
+
+def find_all_paths_to_node(end_node, start_nodes=None):
+    """
+    Find all paths from any root node to the given end_node.
+    A root node is defined as a node with no up_node (i.e., up_node is None).
+    
+    Args:
+        end_node: The target StepNode to find paths to
+        
+    Returns:
+        List of paths, where each path is a list of StepNode objects from root to end_node
+    """
+    all_paths = []
+    
+    def find_paths_from_node(current_node, target_node, visited=None):
+        """
+        Find all paths from current_node to target_node using DFS.
+        """
+        if visited is None:
+            visited = set()
+        
+        # Add current node to visited set (using step_location for cycle detection)
+        visited.add(str(current_node.step_location))
+        
+        # Base case: we reached the target
+        if current_node.step_location == target_node.step_location:
+            return [[current_node]]
+        
+        # Recursive case: explore all down_nodes
+        paths = []
+        # for child in current_node.down_nodes:
+        for child in [down_node for sibling in current_node.step_location.references for down_node in sibling.down_nodes]:
+            # Avoid cycles by checking if we've already visited this step_location
+            if str(child.step_location) not in visited:
+                # Find all paths from child to target
+                child_paths = find_paths_from_node(child, target_node, visited.copy())
+                # Prepend current node to each path found
+                for path in child_paths:
+                    paths.append([current_node] + path)
+        
+        return paths
+    
+    # Find all root nodes (nodes with no up_node)
+    def find_root_nodes(node):
+        """Find all root nodes by traversing up and across the graph."""
+        roots = set()
+        visited = set()
+        
+        def traverse_to_roots(current):
+            if current in visited:
+                return
+            visited.add(str(current))
+            
+            # If no up_node, this is a root
+            if current.up_node is None:
+                roots.add(current)
+            else:
+                # Continue traversing up
+                traverse_to_roots(current.up_node)
+            
+            # Also check siblings (other references of the same step_location)
+            for sibling in current.step_location.references:
+                if str(sibling) not in visited:
+                    traverse_to_roots(sibling)
+        
+        traverse_to_roots(node)
+        return roots
+    
+    # Find all root nodes
+    root_nodes = start_nodes or find_root_nodes(end_node)
+
+    # Find paths from each root to the end_node
+    for root in root_nodes:
+        paths = find_paths_from_node(root, end_node)
+        all_paths.extend(paths)
+    
+    return all_paths
+
 
 # For some external calls, the "location" entry is logged as 
 # # "location": "/home/lpagecaccia/miniconda3/envs/sdpa/lib/python3.10/site-packages/lightning_utilities/core/rank_zero.py:28",
@@ -432,3 +544,29 @@ def read_json_file(path):
     """
     with open(path, 'r') as f:
         return json.load(f)
+
+
+def path_to_where(path, end_node_at_the_end=True):
+    # Like stack_trace, but returns in a format analogous to the `where` command in a debugger.
+    # Namely, 1) 1 node deeper because "root".parent_location is also added
+    # Use `child.parent_location` instead of self.location -> this is aligned with pdb where
+    # For the last node, we increment the line number by 1 (as if we set a breakpoint on the next line)
+    
+    if end_node_at_the_end:
+        path = path[::-1]
+
+    def increment_by_one(loc):
+        if loc:
+            parts = loc.rsplit(":", 1)
+            if len(parts) > 1:
+                return f"{parts[0]}:{int(parts[1]) + 1}"
+            else:
+                return loc
+        return None
+
+    trace = [increment_by_one(path[0].location)]
+    current_node = path[0]
+    for current_node in path[1:]:
+        trace.append(current_node.parent_location)
+        current_node = current_node.up_node
+    return trace[::-1][1:]

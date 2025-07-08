@@ -6,11 +6,6 @@ import numpy as np
 
 from post_processing.utils import build_runtime_trace, find_paths, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node
 
-def get_repo_url(image_name):
-    image_name = image_name.split('swesmith.x86_64.')[1].split(':')[0]
-    repo_url = f"https://github.com/swesmith/{image_name}"
-    return repo_url
-
 if __name__ == '__main__':
     # argparse, with arg --trace_files, array of string paths to files
     import argparse
@@ -20,6 +15,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_siblings', type=int, default=100, help='Maximum number of leaf nodes per parent node')
     parser.add_argument('--leafs_only', action='store_true', help='If set, only leaf nodes will be considered')
     parser.add_argument('--output_path', type=str, default='where_entries_pytest.json', help='Path to save the HuggingFace-friendly dataset')
+    parser.add_argument('--repo', type=str, required=True, help='Repository name for the traces')
     args = parser.parse_args()
 
     """
@@ -38,7 +34,13 @@ if __name__ == '__main__':
     """
 
 
-    all_traces = read_jsonl_file(args.trace_file)  # Assuming the first file contains the relevant data
+    if args.trace_file.endswith('.json'):
+        # If the trace file is a JSON file, read it as a single JSON object
+        swe_info = {'repo': args.repo, 'instance_id': None, 'base_commit': None}
+        test_name = 'single_trace'
+        all_traces = [(swe_info, [(test_name, read_json_file(args.trace_file))])]
+    else:
+        all_traces = read_jsonl_file(args.trace_file)  # Assuming the first file contains the relevant data
 
     STUFF = {
         'start_node' : [],
@@ -93,8 +95,17 @@ if __name__ == '__main__':
 
         filtered_nodes = [node for node in runtime_traces if node.is_first_call or node.is_last_call]
         filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
-        # n_paths = [len(find_all_paths_to_node(node, start_nodes=[start_node])) for node in filtered_nodes]
-        # filtered_nodes = [node for node in filtered_nodes if len(find_paths(node.upest_node, node)) >= args.min_path_amt]
+        # n_paths = [len(find_paths(start_node, node)) for node in filtered_nodes]
+        paths = find_all_paths_to_node(filtered_nodes[5])
+        for path in paths:
+            print(path_to_where(path))
+            print('---')
+        print('\n\n')
+        print(path_to_where(filtered_nodes[5].stack_trace))
+        print('---')
+        n_paths = [len(find_all_paths_to_node(node)) for node in filtered_nodes]
+        breakpoint()
+        # filtered_nodes = [node for node in filtered_nodes if len(find_all_paths_to_node(node.upest_node, node)) >= args.min_path_amt]
         print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls with at least {args.min_path_amt} paths.')
 
         # 3) are leaf nodes 
@@ -126,10 +137,12 @@ if __name__ == '__main__':
         for node in filtered_nodes:
             # Get the stack trace for this node
             stack_trace = node.stack_trace
+            where_trace = node.where
 
             assert stack_trace[-1] == node
 
-            paths = find_all_paths_to_node(stack_trace[-1], start_nodes=[start_node]) #start_node, node)
+            # paths = find_all_paths_to_node(stack_trace[0], stack_trace[-1]) #start_node, node)
+            paths = find_all_paths_to_node(stack_trace[-1]) #start_node, node)
             alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
             if len(paths) < args.min_path_amt:
                 print(f'Node {node} has only {len(paths)} paths, skipping it.')
@@ -149,9 +162,15 @@ if __name__ == '__main__':
 
             assert is_distinct_paths(alternate_paths), "There are non-distinct paths in the alternate paths."
 
+            def to_where_format(path):
+                # instead of each entry having a location to the start of the function, we want the line where the function is called
+                pass
+                
+            ap = alternate_paths[0]
+            breakpoint()
             where_entry = {
                 'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
-                'alternate_paths': [[node.to_dict() for node in path] for path in alternate_paths],     # [[node.to_dict() for node in path] for path in alternate_paths],
+                'alternate_paths': [[node.to_dict() for node in path] for path in alternate_paths],
                 'metadata': metadata,
                 'repo': swe_info['repo'],
                 'instance_id': swe_info['instance_id'],
