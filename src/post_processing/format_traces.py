@@ -22,7 +22,6 @@ if __name__ == '__main__':
         print(f'Processing trace file: {trace_file}')
         with open(trace_file, 'r') as f:
             traces = json.load(f)
-            breakpoint()
             metadata, raw_trace_data = traces['metadata'], traces['trace_data']
 
         start_node = build_runtime_trace(raw_trace_data)
@@ -113,7 +112,7 @@ if __name__ == '__main__':
             'leafs_only': args.leafs_only,
             'source_trace_files': args.trace_files
         },
-        'data': hf_dataset
+        'trace_data': hf_dataset
     }
     
     with open(args.output_path, 'w') as f:

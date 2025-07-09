@@ -205,6 +205,9 @@ class StepNode:
         # Use `child.parent_location` instead of self.location -> this is aligned with pdb where
         # For the last node, we increment the line number by 1 (as if we set a breakpoint on the next line)
         def increment_by_one(loc):
+            # TODO: add a `call` attribute when running the tracer (akin to parent_call), so we can see 
+            # the line being executed
+
             if loc:
                 parts = loc.rsplit(":", 1)
                 if len(parts) > 1:
@@ -213,12 +216,33 @@ class StepNode:
                     return loc
             return None
 
+        def is_importlib(loc):
+            return 'import' in loc or 'importlib_' in loc
+        
+        def replace_line_no_by(loc, replacement):
+            if loc:
+                parts = loc.rsplit(":", 1)
+                if len(parts) > 1:
+                    return f"{parts[0]}:{replacement}"
+                else:
+                    return loc
+            return None
+
         trace = [increment_by_one(self.location)]
         current_node = self
         while current_node:
-            trace.append(current_node.parent_location)
+            if is_importlib(current_node.parent_location):
+                if current_node.up_node is None:
+                    breakpoint()
+                trace.append(replace_line_no_by(current_node.up_node.location, '<import_call>'))
+                # If we hit an importlib location, we stop the trace here
+                # This is to avoid going too deep into the import resolution
+            else:
+                trace.append(current_node.parent_location)
             current_node = current_node.up_node
-        return trace[::-1][1:]
+       
+        trace = trace[::-1]
+        return trace[1:]
 
     @property
     def runtime_trace(self):
@@ -262,6 +286,121 @@ class StepNode:
 
         return self._leaf_nodes
 
+    def print_graph(self, max_depth=None, show_siblings=False, expand_all=False):
+        """
+        Print the full graph starting from this node as root.
+        
+        Args:
+            max_depth: Maximum depth to traverse (None for unlimited)
+            show_siblings: Whether to show sibling references from the same StepLocation
+            expand_all: Whether to expand and show all sibling nodes recursively
+        """
+        print_full_graph(self, max_depth=max_depth, show_siblings=show_siblings, expand_all=expand_all)
+
+def print_full_graph(root_node, max_depth=None, show_siblings=False, expand_all=False):
+    """
+    Print the full graph starting from the given root node.
+    
+    Args:
+        root_node: The StepNode to use as the root of the graph
+        max_depth: Maximum depth to traverse (None for unlimited)
+        show_siblings: Whether to show sibling references from the same StepLocation
+        expand_all: Whether to expand and show all sibling nodes recursively
+    """
+    def print_node(node, prefix="", is_last=True, depth=0, visited=None, expanded_locations=None):
+        if visited is None:
+            visited = set()
+        if expanded_locations is None:
+            expanded_locations = set()
+        
+        # Check max depth
+        if max_depth is not None and depth > max_depth:
+            return
+        
+        # Create a unique identifier for the node
+        node_id = id(node)
+        
+        # Prepare node info
+        connector = "└── " if is_last else "├── "
+        node_info = f"{node.name or 'unnamed'} @ {node.location}"
+        
+        # Add additional info
+        extras = []
+        if node_id in visited:
+            extras.append("*CYCLE*")
+        
+        # Check if this is a sibling reference
+        if node.step_location.references.index(node) > 0:
+            extras.append(f"ref#{node.step_location.references.index(node) + 1}")
+        
+        extras_str = f" [{', '.join(extras)}]" if extras else ""
+        
+        # Print the node
+        print(f"{prefix}{connector}{node_info}{extras_str}")
+        
+        # Mark as visited
+        if node_id in visited:
+            return
+        visited.add(node_id)
+        
+        # Show siblings if requested
+        if show_siblings and len(node.step_location.references) > 1:
+            sibling_prefix = prefix + ("    " if is_last else "│   ")
+            print(f"{sibling_prefix}    [Siblings: {len(node.step_location.references)} total references]")
+        
+        # Process children and siblings
+        nodes_to_process = []
+        
+        # Always add direct children
+        nodes_to_process.extend(node.down_nodes)
+        
+        # If expand_all is True and we haven't expanded this location yet, add siblings
+        if expand_all and str(node.step_location) not in expanded_locations:
+            expanded_locations.add(str(node.step_location))
+            
+            # Get all sibling nodes except the current one
+            siblings = [down_node for sibling in node.step_location.references for down_node in sibling.down_nodes if down_node is not node]
+            
+            # For each sibling, we want to process its down_nodes
+            for sibling in siblings:
+                if sibling.down_nodes:
+                    # Add a special marker node to indicate this is from a sibling
+                    nodes_to_process.append(('sibling', sibling))
+        
+        if nodes_to_process:
+            # Prepare the prefix for children
+            extension = "    " if is_last else "│   "
+            child_prefix = prefix + extension
+            
+            # Print each child/sibling expansion
+            for i, item in enumerate(nodes_to_process):
+                is_last_child = (i == len(nodes_to_process) - 1)
+                
+                if isinstance(item, tuple) and item[0] == 'sibling':
+                    # This is a sibling expansion
+                    sibling = item[1]
+                    sibling_id = sibling.step_location.references.index(sibling) + 1
+                    print(f"{child_prefix}{'└── ' if is_last_child else '├── '}[Sibling expansion from ref#{sibling_id}]")
+                    
+                    # Print the sibling's children
+                    sibling_extension = "    " if is_last_child else "│   "
+                    sibling_prefix = child_prefix + sibling_extension
+                    
+                    for j, child in enumerate(sibling.down_nodes):
+                        is_last_sibling_child = (j == len(sibling.down_nodes) - 1)
+                        print_node(child, sibling_prefix, is_last_sibling_child, depth + 1, visited, expanded_locations)
+                else:
+                    # This is a regular child
+                    print_node(item, child_prefix, is_last_child, depth + 1, visited, expanded_locations)
+    
+    print("=" * 80)
+    print(f"Call Graph from: {root_node.name or 'root'} @ {root_node.location}")
+    if expand_all:
+        print("(Showing expanded graph with all sibling paths)")
+    print("=" * 80)
+    print_node(root_node)
+    print("=" * 80)
+
 class WhereEntry:
     # Structure to store the output of a Where Command, along with alternative paths from the same start and end node
     def __init__(self, stack_trace=None, alternate_paths=None, command=None):
@@ -288,6 +427,9 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
 
     for entry in raw_trace_data:
         previous_depth_node = depths.get(entry['depth'] - 1)
+
+        if previous_depth_node is None and entry['depth'] > 0:
+            print(f'Warning: No previous depth node found for depth {entry["depth"] - 1}. This might indicate a missing parent call.')
 
         node = StepNode(**entry, 
                         previous_node=previous_node, 
@@ -323,68 +465,41 @@ def pp(stack_trace):
             print(f"Number of Calls: {entry.number_of_calls}")
         print("-" * 40)
 
-'''
-# for a given node in the graph, compute the list of paths to another node. If cycle exists, mark it.
-def find_paths(start_node, end_node):
-    """Find all paths from start_node to end_node in the graph G."""
-    paths = []
-    def dfs(current_node, path):
-        if current_node.step_location == end_node.step_location:
-            paths.append(path.copy())
-            return
-        for neighbor in current_node.down_nodes:  # Assuming down_nodes are the neighbors
-            if neighbor.step_location not in [x.step_location for x in path]:  # Avoid cycles
-                path.append(neighbor)
-                dfs(neighbor, path)
-                path.pop()
 
-    dfs(start_node, [start_node])
-'''
+def find_alternate_paths(stack_trace, max_paths=None):
+    """
+    Given a stack trace, find alternate paths to reach the end node. 
+    1) For each node in the stack trace, "branch" by looking at node.step_location.references
+    2) For each reference, climb up the tree to reach a root node
+    stack_trace[0] is the top of the stack 
+    stack_trace[-1] is the deepest call (the end node)
+    """
+    branches = []
+    for index in range(len(stack_trace)):
+        node = stack_trace[index]
+        for sibling in node.step_location.references:
+            if sibling is not node:
+                branches.append((index, sibling))
 
-def find_paths(end_node):
-    # Now that we are using the proper format for the `where` output, we don't need the start 
-    # nodes to match. We can simply find all paths to the end_node.
-    paths = []
-    def recurse(current_node, path):
-        # This function takes in a path from end_node to current_node. It will explore all
-        # possible paths to the end_node by following the down_nodes.
-        # it returns all paths from the end_node to neighbors of current_node (if not already in path)
-        # terminate when current_node has no up_node
-        if current_node is None:
-            # We reached the root node, add the path to the paths list
-            # path.insert(0, current_node)
-            paths.append(path.copy())
-            return
+    if max_paths is not None:
+        print(f'Sampling {max_paths} branches from {len(branches)} total branches.')
+        branches = random.sample(branches, min(max_paths, len(branches)))
 
-        # if it's not none, we can continue
+    # For each branch, find all paths to the root node
+    unique_paths = []
+    seen_sequences = set()
+    for index, sibling in branches:
+        path = sibling.stack_trace + stack_trace[index+1:]
+        if len(path) == 0 and sibling.depth >  0:
+            print(f'Node {sibling} has depth {sibling.depth} but up node is {sibling.up_node} (None). Skipping')
+            continue
+        if str(path) not in seen_sequences:
+            seen_sequences.add(str(path))
+            unique_paths.append(path)
 
-        # NOTE: we know current_node has an up_node, safe to use parent_location ? 
-        # Iterate through all down nodes of the current node
-        for sibling in current_node.step_location.references:
-            parent = sibling.up_node
+    return unique_paths
 
-            # If the neighbor is not already in the path, we can explore it
-            if sibling.step_location not in [x.step_location for x in path]:
-                # Add the neighbor to the path
-                path.insert(0, sibling)
-                # Recurse into the neighbor
-                recurse(parent, path)
-                # Backtrack by removing the first node from the path
-                # (we are using insert(0, ...) to build the path from end_node to start_node)
-                path.pop(0)
-
-    recurse(end_node, [])
-
-    # We want to make sure that the StepLocation paths are unique, NOT JUST the StepNode paths
-    random.shuffle(paths)
-
-    unique_paths = {}
-    for path in paths:
-        unique_paths['-'.join(to_sequence(path))] = path
-
-    return list(unique_paths.values())
-
-def find_all_paths_to_node(end_node, expand=False):
+def find_all_paths_to_node(end_node, expand=False, max_paths=None, oracle_path=None):
     """
     Find all paths from any root node to the given end_node.
     A root node is defined as a node with no up_node (i.e., up_node is None).
@@ -394,11 +509,15 @@ def find_all_paths_to_node(end_node, expand=False):
     
     Args:
         end_node: The target StepNode to find paths to
+        expand: Whether to expand all siblings or just direct parent references
+        max_paths: Maximum number of paths to return (for performance)
+        oracle_path: A known path to prioritize variations around
         
     Returns:
         List of paths, where each path is a list of StepNode objects from root to end_node
     """
-    all_paths = []
+    unique_paths = []
+    seen_sequences = set()
     
     def find_paths_from_node(target_node, visited=None, expand=False):
         """
@@ -408,53 +527,68 @@ def find_all_paths_to_node(end_node, expand=False):
         if visited is None:
             visited = set()
         
+        # Early termination if we already have enough unique paths
+        if max_paths is not None and len(unique_paths) >= max_paths:
+            return []
+        
         # Add current node to visited set (using step_location for cycle detection)
         visited.add(str(target_node.step_location))
         
         # Base case: we reached a root node (no up_node)
         if target_node.up_node is None:
-            return [[target_node]]
+            path = [target_node]
+            # Check uniqueness immediately
+            path_sequence = tuple(str(node.step_location) for node in path)
+            if path_sequence not in seen_sequences:
+                seen_sequences.add(path_sequence)
+                unique_paths.append(path)
+            return [path] if path_sequence not in seen_sequences else []
         
         # Recursive case: explore all parent nodes (up_nodes) through siblings
         paths = []
         
-        # Get all siblings that share the same step_location as the target's up_node
-        up_node = target_node.up_node
+        # Get parent nodes to explore
         if expand: 
             up_nodes = [sibling.up_node for sibling in target_node.step_location.references if sibling.up_node is not None]
         else:
+            up_node = target_node.up_node
             up_nodes = [sibling for sibling in up_node.step_location.references if sibling is not None]
+        
+        # If we have an oracle path, prioritize nodes that appear in it
+        if oracle_path:
+            oracle_locations = {str(node.step_location) for node in oracle_path}
+            # Sort up_nodes to prioritize those in oracle path
+            up_nodes = sorted(up_nodes, key=lambda node: str(node.step_location) in oracle_locations, reverse=True)
+        
         for up_node in up_nodes:
-            # for sibling in up_node.step_location.references:
-            #     # Avoid cycles by checking if we've already visited this step_location
+            # Early termination check
+            if max_paths is not None and len(unique_paths) >= max_paths:
+                break
+
             if str(up_node.step_location) not in visited:
-                # Find all paths from root to this sibling
+                # Find all paths from root to this parent node
                 parent_paths = find_paths_from_node(up_node, visited.copy(), expand=expand)
                 # Append current target node to each path found
                 for path in parent_paths:
-                    paths.append(path + [target_node])
-
-        """
-        (OLD CODE)
-        # Recursive case: explore all down_nodes
-        paths = []
-        # for child in current_node.down_nodes:
-        for child in [down_node for sibling in current_node.step_location.references for down_node in sibling.down_nodes]:
-            # Avoid cycles by checking if we've already visited this step_location
-            if str(child.step_location) not in visited:
-                # Find all paths from child to target
-                child_paths = find_paths_from_node(child, target_node, visited.copy())
-                # Prepend current node to each path found
-                for path in child_paths:
-                    paths.append([current_node] + path)
-        """
+                    new_path = path + [target_node]
+                    
+                    # Check uniqueness immediately before adding
+                    path_sequence = tuple(str(node.step_location) for node in new_path)
+                    if path_sequence not in seen_sequences:
+                        seen_sequences.add(path_sequence)
+                        unique_paths.append(new_path)
+                        paths.append(new_path)
+                        
+                        # Early termination check
+                        if max_paths is not None and len(unique_paths) >= max_paths:
+                            break
 
         return paths
-    
+
     # Find all paths from root nodes to the end_node by working backwards
-    all_paths = find_paths_from_node(end_node, expand=expand)
+    find_paths_from_node(end_node, expand=expand)
     
-    return all_paths
+    return unique_paths
 
 
 # For some external calls, the "location" entry is logged as 
@@ -558,10 +692,30 @@ def path_to_where(path, end_node_at_the_end=True):
             else:
                 return loc
         return None
-
+        
+    def is_importlib(loc):
+        return 'import' in loc or 'importlib_' in loc
+    
+    def replace_line_no_by(loc, replacement):
+        if loc:
+            parts = loc.rsplit(":", 1)
+            if len(parts) > 1:
+                return f"{parts[0]}:{replacement}"
+            else:
+                return loc
+        return None
+    
     trace = [increment_by_one(path[0].location)]
-    current_node = path[0]
-    for current_node in path[1:]:
-        trace.append(current_node.parent_location)
-        current_node = current_node.up_node
+    for i, current_node in enumerate(path):
+        if is_importlib(current_node.parent_location):
+            if current_node is path[-1]:
+                # If this is the last node, we replace the line number by <import_call>
+                # We leave as-is -> will get removed 
+                trace.append(current_node.parent_location)
+            else:
+                trace.append(replace_line_no_by(path[i+1].location, '<import_call>'))
+            # If we hit an importlib location, we stop the trace here
+            # This is to avoid going too deep into the import resolution
+        else:
+            trace.append(current_node.parent_location)
     return trace[::-1][1:]

@@ -4,7 +4,41 @@ import sys
 import os
 import numpy as np
 
-from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node, find_alternate_paths
+
+import subprocess
+import os
+
+def apply_escaped_patch(patch_string: str, root_dir: str):
+    """
+    Decodes a Python-style escaped patch string and applies it using `git apply`
+    from the specified root directory.
+
+    Args:
+        patch_string (str): The patch as a string with escaped newlines (e.g., '\\n').
+        root_dir (str): The directory where `git apply` should be executed.
+    """
+    try:
+
+        # save the string to file
+        patch_file_path = os.path.join(root_dir, 'temp_patch.patch')
+        with open(patch_file_path, 'w') as patch_file:
+            patch_file.write(patch_string)
+
+        # Apply the patch from within root_dir
+        subprocess.run(
+            ["git", "apply", patch_file_path],
+            text=True,
+            check=True,
+            cwd=root_dir  # Change directory before running the command
+        )
+        print("Patch applied successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to apply patch:", e)
+    except Exception as e:
+        print("Error:", e)
+
+
 
 def get_repo_url(image_name):
     image_name = image_name.split('swesmith.x86_64.')[1].split(':')[0]
@@ -48,7 +82,7 @@ if __name__ == '__main__':
         'metadata': []
     }
     all_where_entries = []
-    where_entries_per_test = {}
+    where_entries_per_test = {} 
 
     for stuff in all_traces:
         swe_info, traces = stuff
@@ -57,142 +91,146 @@ if __name__ == '__main__':
             trace_data, metadata = trace['trace_data'], trace['metadata']
         
             print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
-            
+
+            test_file = test_name.split('::')[0]
+
+            if not any([test_file in step['location'] and step['call_type'] == 'function_call' for step in trace_data]):
+                print(f'Skipping trace for test: {test_name} in repo: {swe_info["repo"]} because it has no function calls in the trace data.')
+                continue
+
+            where_entries_per_test[test_name] = 0
             # Build the runtime trace from the raw trace data
             start_node = build_runtime_trace(trace_data)
-            STUFF['start_node'].append(start_node)
-            STUFF['swe_info'].append(swe_info)
-            STUFF['processed_trace'].append(trace)
-            STUFF['test_name'].append(test_name)
-            STUFF['metadata'].append(metadata)
-
+            # STUFF['start_node'].append(start_node)
+            # STUFF['swe_info'].append(swe_info)
+            # STUFF['processed_trace'].append(trace)
+            # STUFF['test_name'].append(test_name)
+            # STUFF['metadata'].append(metadata)
+ 
             print(f'Total number of StepLocation entries {len(StepLocation._registry)}')
 
-        # for i in range(len(STUFF['start_node'])):
-        i = len(STUFF['start_node']) - 1  # Process the last trace in the list
+            # for i in range(len(STUFF['start_node'])):
 
-        start_node = STUFF['start_node'][i]
-        trace = STUFF['processed_trace'][i]
-        swe_info = STUFF['swe_info'][i]
-        test_name = STUFF['test_name'][i]
-        metadata = STUFF['metadata'][i]
+            # start_node = STUFF['start_node'][i]
+            # trace = STUFF['processed_trace'][i]
+            # swe_info = STUFF['swe_info'][i]
+            # test_name = STUFF['test_name'][i]
+            # metadata = STUFF['metadata'][i]
+            # test_file = test_name.split('::')[0]
 
-        print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
+            print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
 
-        where_entries_per_test[test_name] = 0
-        
-        runtime_traces = start_node.runtime_trace
-        depths = np.bincount([node.depth for node in runtime_traces])
-        print(depths)
+            runtime_traces = start_node.runtime_trace
+            depths = np.bincount([node.depth for node in runtime_traces])
+            print(depths)
 
-        # First, we filter out nodes with insufficient alternate paths from root to said node
-        # filtered_nodes = [node for node in runtime_traces if len(find_paths(start_node, node)) >= args.min_path_amt]
+            # First, we filter out nodes with insufficient alternate paths from root to said node
+            # filtered_nodes = [node for node in runtime_traces if len(find_paths(start_node, node)) >= args.min_path_amt]
 
-        # Once we have the runtime traces, let's filter out to select only :
-        # 1) the first calls to a given StepLocation
-        # 2) the last calls to a given StepLocation 
+            # Once we have the runtime traces, let's filter out to select only :
+            # 1) the first calls to a given StepLocation
+            # 2) the last calls to a given StepLocation 
 
-        filtered_nodes = [node for node in runtime_traces if node.is_first_call or node.is_last_call]
-        filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
-        # n_paths = [len(find_all_paths_to_node(node, start_nodes=[start_node])) for node in filtered_nodes]
-        # filtered_nodes = [node for node in filtered_nodes if len(find_paths(node.upest_node, node)) >= args.min_path_amt]
-        print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls') # with at least {args.min_path_amt} paths.')
+            filtered_nodes = [node for node in runtime_traces if node.call_type == 'function_call']
+            filtered_nodes = [node for node in filtered_nodes if node.is_first_call or node.is_last_call]
+            filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
+            # n_paths = [len(find_all_paths_to_node(node, start_nodes=[start_node])) for node in filtered_nodes]
+            # filtered_nodes = [node for node in filtered_nodes if len(find_paths(node.upest_node, node)) >= args.min_path_amt]
+            print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls') # with at least {args.min_path_amt} paths.')
+            filtered_nodes = [x for x in filtered_nodes if any([test_file in y.location for y in x.stack_trace])]
+            print(f'Found {len(filtered_nodes)} nodes after filtering for test file {test_file}.')
 
-        # 3) are leaf nodes 
-        # 4) potentially restrict the amount of sibling nodes
-        if args.leafs_only:
-            parents_to_leaf_nodes = list(set([
-                node.up_node for node in filtered_nodes if node.is_leaf_node and node.up_node is not None
-            ]))
-            subsampled_leaf_nodes = []
-            for parent in parents_to_leaf_nodes:
-                leaf_nodes = [child for child in parent.down_nodes if child.is_leaf_node and not child.is_external]
-                if len(leaf_nodes) > args.max_siblings:
-                    leaf_nodes = random.sample(leaf_nodes, args.max_siblings)
-                subsampled_leaf_nodes.extend(leaf_nodes)
-
-            filtered_nodes = subsampled_leaf_nodes
-        else:
-            # We consider all nodes, but remove a node if it appears in another node's trace
-            filtered_nodes = [
-                node for node in filtered_nodes if not any(
-                    other_node != node and node.step_location in other_node.step_location.references
-                    for other_node in filtered_nodes
-                )
-            ]
-
-        print(f'Found {len(filtered_nodes)} nodes after filtering for leaf nodes and max siblings ({args.max_siblings}).')
-        # Finally, build the where entries
-        where_entries = []
-
-        for node in filtered_nodes:
-            # Get the stack trace for this node
-            stack_trace = node.stack_trace
-
-            assert stack_trace[-1] == node
-
-            breakpoint()
-            paths = find_all_paths_to_node(stack_trace[-1], expand=False) #start_node, node)
-            if len(paths) < args.min_path_amt: 
-                paths = find_all_paths_to_node(stack_trace[-1], expand=True) #start_node, node)
-            alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
-            if len(paths) < args.min_path_amt:
-                print(f'Node {node} has only {len(paths)} paths, skipping it.')
-                continue
+            # 3) are leaf nodes 
+            # 4) potentially restrict the amount of sibling nodes
+            if args.leafs_only:
+                filtered_nodes = [node for node in filtered_nodes if node.is_leaf_node]
             else:
-                pp(stack_trace)
-                print('\n\n\n')
-            assert len(alternate_paths) + 1 == len(paths) or len(stack_trace) > len(set(to_sequence(stack_trace))), "stack trace either exists in path, or contains a cycle"
+                # We consider all nodes, but remove a node if it appears in another node's trace
+                filtered_nodes = [
+                    node for node in filtered_nodes if not any(
+                        other_node != node and node.step_location in other_node.step_location.references
+                        for other_node in filtered_nodes
+                    )
+                ]
 
-            """
-            start_node = STUFF['start_node'][i]
-            trace = STUFF['processed_trace'][i]
-            swe_info = STUFF['swe_info'][i]
-            test_name = STUFF['test_name'][i]
-            metadata = STUFF['metadata'][i] 
-            """
+            print(f'Found {len(filtered_nodes)} nodes after filtering for leaf nodes and max siblings ({args.max_siblings}).')
+            # Finally, build the where entries
+            where_entries = []
 
-            assert is_distinct_paths(alternate_paths), "There are non-distinct paths in the alternate paths."
+            for node in filtered_nodes:
+                # Get the stack trace for this node
+                stack_trace = node.stack_trace
 
-            where_entry = {
-                'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
-                'alternate_paths': [[node.to_dict() for node in path] for path in alternate_paths],     # [[node.to_dict() for node in path] for path in alternate_paths],
-                'metadata': metadata,
-                'repo': swe_info['repo'],
-                'instance_id': swe_info['instance_id'],
-                'base_commit': swe_info['base_commit'],
-                'test_name': test_name,
-                'is_first': node.is_first_call,
-                'is_last': node.is_last_call,
-            }
-            where_entries.append(where_entry)
-            where_entries_per_test[test_name] += 1
+                assert stack_trace[-1] == node
 
-        # Add where entries from this trace file to the global collection
-        all_where_entries.extend(where_entries)
+                # paths = find_all_paths_to_node(stack_trace[-1], expand=False, max_paths=10, oracle_path=stack_trace) #start_node, node)
+                paths = find_alternate_paths(stack_trace, max_paths=50)
+                # breakpoint()
+                #if len(paths) < args.min_path_amt:
+                #    print('NOT ENOUGH PATHS') 
+                #    paths = find_all_paths_to_node(stack_trace[-1], expand=True) #start_node, node)
+                alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
+                if len(paths) < args.min_path_amt:
+                    print(f'Node {node} has only {len(paths)} paths, skipping it.')
+                    continue
+                else:
+                    pp(stack_trace)
+                    print('\n\n\n')
+                # assert len(alternate_paths) + 1 == len(paths) or len(stack_trace) > len(set(to_sequence(stack_trace))), breakpoint() # "stack trace either exists in path, or contains a cycle"
+                assert all([to_sequence(path) != to_sequence(stack_trace) for path in alternate_paths]), \
+                    "Stack trace should not be present in alternate paths, it should be the last path in the list."
 
-        # assert all(is_distinct_paths(entry.alternate_paths) for entry in where_entries), "There are non-distinct paths in the where entries."
+                for ap in alternate_paths:
+                    assert stack_trace[-1].step_location == ap[-1].step_location, breakpoint() # 
+                    f"Last node in alternate path {ap[-1]} should be the same as the last node in the stack trace {stack_trace[-1]}."
 
-        print(f'Added {len(where_entries)} where entries from {args.trace_file}')
+                assert is_distinct_paths(alternate_paths), "There are non-distinct paths in the alternate paths."
+                print(node.where)
+                print('---')
+                for ap in alternate_paths:
+                    print(path_to_where(ap))
+                    print()
+                print('---')
 
-    # After processing all trace files, save the dataset in HuggingFace-friendly format
-    print(f'Total where entries collected: {len(all_where_entries)}')
+                where_entry = {
+                    'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
+                    'alternate_paths': [[node.to_dict() for node in path] for path in alternate_paths],     # [[node.to_dict() for node in path] for path in alternate_paths],
+                    'metadata': metadata,
+                    'repo': swe_info['repo'],
+                    'instance_id': swe_info['instance_id'],
+                    'base_commit': swe_info['base_commit'],
+                    'test_name': test_name,
+                    'is_first': node.is_first_call,
+                    'is_last': node.is_last_call,
+                }
+                where_entries.append(where_entry)
+                where_entries_per_test[test_name] += 1
 
-    # Save the dataset
-    output_data = {
-        'metadata': {
-            'total_entries': len(all_where_entries),
-            'min_path_amt': args.min_path_amt,
-            'max_siblings': args.max_siblings,
-            'leafs_only': args.leafs_only,
-            'source_trace_files': args.trace_file,
-            'where_entries_per_test': where_entries_per_test,
+            # Add where entries from this trace file to the global collection
+            all_where_entries.extend(where_entries)
 
-        },
-        'data': all_where_entries
-    }
+            # assert all(is_distinct_paths(entry.alternate_paths) for entry in where_entries), "There are non-distinct paths in the where entries."
 
-    with open(args.output_path, 'w') as f:
-        json.dump(output_data, f, indent=2)
+            print(f'Added {len(where_entries)} where entries from {args.trace_file}')
 
-    print(f'Saved {len(all_where_entries)} where entries to {args.output_path}')
+# After processing all trace files, save the dataset in HuggingFace-friendly format
+print(f'Total where entries collected: {len(all_where_entries)}')
+
+# Save the dataset
+output_data = {
+    'metadata': {
+        'total_entries': len(all_where_entries),
+        'min_path_amt': args.min_path_amt,
+        'max_siblings': args.max_siblings,
+        'leafs_only': args.leafs_only,
+        'source_trace_files': args.trace_file,
+        'where_entries_per_test': where_entries_per_test,
+
+    },
+    'data': all_where_entries
+}
+
+with open(args.output_path, 'w') as f:
+    json.dump(output_data, f, indent=2)
+
+print(f'Saved {len(all_where_entries)} where entries to {args.output_path}')

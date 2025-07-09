@@ -4,7 +4,7 @@ import sys
 import os
 import numpy as np
 
-from post_processing.utils import build_runtime_trace, find_paths, to_sequence, is_distinct_paths, WhereEntry, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node, find_alternate_paths
 
 if __name__ == '__main__':
     # argparse, with arg --trace_files, array of string paths to files
@@ -32,7 +32,6 @@ if __name__ == '__main__':
         ]    
     ]
     """
-
 
     if args.trace_file.endswith('.json'):
         # If the trace file is a JSON file, read it as a single JSON object
@@ -83,6 +82,7 @@ if __name__ == '__main__':
         where_entries_per_test[test_name] = 0
         
         runtime_traces = start_node.runtime_trace
+        xx = runtime_traces[::-1]
         depths = np.bincount([node.depth for node in runtime_traces])
         print(depths)
 
@@ -96,15 +96,19 @@ if __name__ == '__main__':
         filtered_nodes = [node for node in runtime_traces if node.is_first_call or node.is_last_call]
         filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
         # n_paths = [len(find_paths(start_node, node)) for node in filtered_nodes]
-        paths = find_all_paths_to_node(filtered_nodes[5])
-        for path in paths:
-            print(path_to_where(path))
+        
+        for i in range(len(filtered_nodes)):
+            paths = find_alternate_paths(filtered_nodes[i].stack_trace)
+            print('[Where ], \t' + str(filtered_nodes[i].where) + '\n\n\n')
+            for path in paths:
+                print(path_to_where(path))
+                print('---')
+            print('\n\n')
+            # print(path_to_where(filtered_nodes[5].stack_trace))
+            # print(filtered_nodes[5].where)
             print('---')
-        print('\n\n')
-        print(path_to_where(filtered_nodes[5].stack_trace))
-        print('---')
+            breakpoint()
         n_paths = [len(find_all_paths_to_node(node)) for node in filtered_nodes]
-        breakpoint()
         # filtered_nodes = [node for node in filtered_nodes if len(find_all_paths_to_node(node.upest_node, node)) >= args.min_path_amt]
         print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls with at least {args.min_path_amt} paths.')
 
@@ -170,7 +174,7 @@ if __name__ == '__main__':
             breakpoint()
             where_entry = {
                 'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
-                'alternate_paths': [[node.to_dict() for node in path] for path in alternate_paths],
+                'alternate_paths': [path_to_where(path) for path in alternate_paths],
                 'metadata': metadata,
                 'repo': swe_info['repo'],
                 'instance_id': swe_info['instance_id'],
