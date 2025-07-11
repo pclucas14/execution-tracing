@@ -4,7 +4,7 @@ import sys
 import os
 import numpy as np
 
-from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, read_json_file, path_to_where, find_all_paths_to_node, find_alternate_paths
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, path_to_where, find_alternate_paths, read_json_file
 
 if __name__ == '__main__':
     # argparse, with arg --trace_files, array of string paths to files
@@ -61,21 +61,8 @@ if __name__ == '__main__':
             
             # Build the runtime trace from the raw trace data
             start_node = build_runtime_trace(trace_data)
-            STUFF['start_node'].append(start_node)
-            STUFF['swe_info'].append(swe_info)
-            STUFF['processed_trace'].append(trace)
-            STUFF['test_name'].append(test_name)
-            STUFF['metadata'].append(metadata)
 
             print(f'Total number of StepLocation entries {len(StepLocation._registry)}')
-
-    for i in range(len(STUFF['start_node'])):
-
-        start_node = STUFF['start_node'][i]
-        trace = STUFF['processed_trace'][i]
-        swe_info = STUFF['swe_info'][i]
-        test_name = STUFF['test_name'][i]
-        metadata = STUFF['metadata'][i]
 
         print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
 
@@ -97,9 +84,9 @@ if __name__ == '__main__':
         filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
         # n_paths = [len(find_paths(start_node, node)) for node in filtered_nodes]
         
-        for i in range(len(filtered_nodes)):
-            paths = find_alternate_paths(filtered_nodes[i].stack_trace)
-            print('[Where ], \t' + str(filtered_nodes[i].where) + '\n\n\n')
+        for node in filtered_nodes: 
+            paths = find_alternate_paths(node.stack_trace)
+            print('[Where ], \t' + str(node.where) + '\n\n\n')
             for path in paths:
                 print(path_to_where(path))
                 print('---')
@@ -107,8 +94,7 @@ if __name__ == '__main__':
             # print(path_to_where(filtered_nodes[5].stack_trace))
             # print(filtered_nodes[5].where)
             print('---')
-            breakpoint()
-        n_paths = [len(find_all_paths_to_node(node)) for node in filtered_nodes]
+        
         # filtered_nodes = [node for node in filtered_nodes if len(find_all_paths_to_node(node.upest_node, node)) >= args.min_path_amt]
         print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls with at least {args.min_path_amt} paths.')
 
@@ -146,7 +132,7 @@ if __name__ == '__main__':
             assert stack_trace[-1] == node
 
             # paths = find_all_paths_to_node(stack_trace[0], stack_trace[-1]) #start_node, node)
-            paths = find_all_paths_to_node(stack_trace[-1]) #start_node, node)
+            paths = find_alternate_paths(stack_trace, max_paths=50)
             alternate_paths = [path for path in paths if to_sequence(path) != to_sequence(stack_trace)]
             if len(paths) < args.min_path_amt:
                 print(f'Node {node} has only {len(paths)} paths, skipping it.')
@@ -154,7 +140,7 @@ if __name__ == '__main__':
             else:
                 pp(stack_trace)
                 print('\n\n\n')
-            assert len(alternate_paths) + 1 == len(paths) or len(stack_trace) > len(set(to_sequence(stack_trace))), "stack trace either exists in path, or contains a cycle"
+            # assert len(alternate_paths) + 1 == len(paths) or len(stack_trace) > len(set(to_sequence(stack_trace))), "stack trace either exists in path, or contains a cycle"
 
             """
             start_node = STUFF['start_node'][i]
@@ -166,12 +152,6 @@ if __name__ == '__main__':
 
             assert is_distinct_paths(alternate_paths), "There are non-distinct paths in the alternate paths."
 
-            def to_where_format(path):
-                # instead of each entry having a location to the start of the function, we want the line where the function is called
-                pass
-                
-            ap = alternate_paths[0]
-            breakpoint()
             where_entry = {
                 'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
                 'alternate_paths': [path_to_where(path) for path in alternate_paths],
