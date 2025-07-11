@@ -22,6 +22,11 @@ class IterationBreakpointTracer(bdb.Bdb):
         assert self.scope_path, "Scope path must be provided"
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
         print(f"Scope path: {self.scope_path}")  # Changed from scope_dir
+        
+        # Reset the debugger to initialize all required attributes
+        self.reset()
+        
+        # Now set the breakpoint
         self.set_break(self.filename, lineno)
 
     def user_line(self, frame):
@@ -239,3 +244,43 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
             '__builtins__': __builtins__,
         }
         tracer.run(code, exec_globals, exec_globals)
+
+def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, scope_path):
+    """Main function to run the tracer with pytest."""
+    # Import pytest
+    try:
+        import pytest
+    except ImportError:
+        print("Error: pytest is not installed. Please install it with: pip install pytest")
+        sys.exit(1)
+    
+    # Create the tracer
+    tracer = IterationBreakpointTracer(
+        filename=breakpoint_file,
+        lineno=lineno,
+        max_hits=iterations,
+        output_file=output_file,
+        scope_path=scope_path
+    )
+    
+    print(f"Running pytest with arguments: {pytest_args}")
+    
+    # Set the tracer
+    sys.settrace(tracer.trace_dispatch)
+    
+    try:
+        # Run pytest
+        exit_code = pytest.main(pytest_args)
+        
+        # If we reach here without hitting the breakpoint enough times, report it
+        if tracer.hit_count < tracer.max_hits:
+            print(f"\nWarning: Breakpoint was only hit {tracer.hit_count} times (expected {tracer.max_hits})")
+            print("Saving partial trace...")
+            if tracer.hit_count > 0:
+                tracer.save_trace()
+        
+        sys.exit(exit_code)
+        
+    finally:
+        # Clear the tracer
+        sys.settrace(None)

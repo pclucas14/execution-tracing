@@ -178,6 +178,9 @@ def where_command():
     scope_path = None
     if args.scope:
         scope_path = os.path.abspath(os.path.expanduser(args.scope))
+    else:
+        # Default to the directory containing the script
+        scope_path = os.path.dirname(script_path)
     
     print(f"Running trace_where:")
     print(f"  Script: {script_path}")
@@ -196,6 +199,59 @@ def where_command():
         output_file=output_file,
         scope_path=scope_path,  # Changed from scope_dir
         script_args=script_args
+    )
+
+def where_pytest_command():
+    from tracer.where import main_pytest as where_main_pytest
+    parser = argparse.ArgumentParser(
+        description="Run pytest and print stack trace at a breakpoint.",
+        usage='trace_where_pytest [pytest args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]'
+    )
+    
+    # Required arguments for breakpoint
+    parser.add_argument("--file", required=True, help="Target file where to set the breakpoint")
+    parser.add_argument("--line", type=int, required=True, help="Line number for the breakpoint")
+    parser.add_argument("--iterations", type=int, required=True, help="Number of times to hit the breakpoint before printing stack trace")
+    
+    # Optional arguments
+    parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
+    parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    
+    # Parse known args to handle pytest arguments
+    args, pytest_args = parser.parse_known_args()
+    
+    # Get absolute paths
+    breakpoint_file = os.path.abspath(args.file)
+    
+    # Default output file if not specified
+    if not args.output_file:
+        output_file = f"trace_where_pytest_output_{os.path.basename(args.file).replace('.py', '')}"
+    else:
+        output_file = args.output_file
+    
+    # Resolve scope path
+    scope_path = None
+    if args.scope:
+        scope_path = os.path.abspath(os.path.expanduser(args.scope))
+    else:
+        # Default to current working directory
+        scope_path = os.getcwd()
+    
+    print(f"Running trace_where_pytest:")
+    print(f"  Pytest args: {' '.join(pytest_args)}")
+    print(f"  Breakpoint: {breakpoint_file}:{args.line}")
+    print(f"  Iterations: {args.iterations}")
+    print(f"  Output: {output_file}")
+    print(f"  Scope: {scope_path}")
+    
+    # Run the tracer
+    where_main_pytest(
+        pytest_args=pytest_args,
+        breakpoint_file=breakpoint_file,
+        lineno=args.line,
+        iterations=args.iterations,
+        output_file=output_file,
+        scope_path=scope_path
     )
 
 if __name__ == "__main__":

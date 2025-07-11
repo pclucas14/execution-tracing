@@ -11,6 +11,7 @@ setup(
             'trace_program=cli.main:main',
             'trace_pytest=cli.main:trace_pytest_main',
             'trace_where=cli.main:where_command',
+            'trace_where_pytest=cli.main:where_pytest_command',
         ],
     },
     python_requires='>=3.6',
