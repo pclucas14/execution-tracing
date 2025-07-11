@@ -205,7 +205,7 @@ def where_pytest_command():
     from tracer.where import main_pytest as where_main_pytest
     parser = argparse.ArgumentParser(
         description="Run pytest and print stack trace at a breakpoint.",
-        usage='trace_where_pytest [pytest args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]'
+        usage='trace_where_pytest [pytest args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE] [--continue]'
     )
     
     # Required arguments for breakpoint
@@ -216,6 +216,8 @@ def where_pytest_command():
     # Optional arguments
     parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
     parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    parser.add_argument("--continue", dest="continue_execution", action="store_true", 
+                       help="Continue test execution after hitting the breakpoint (don't exit)")
     
     # Parse known args to handle pytest arguments
     args, pytest_args = parser.parse_known_args()
@@ -251,7 +253,8 @@ def where_pytest_command():
         lineno=args.line,
         iterations=args.iterations,
         output_file=output_file,
-        scope_path=scope_path
+        scope_path=scope_path,
+        continue_execution=args.continue_execution
     )
 
 if __name__ == "__main__":

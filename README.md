@@ -72,6 +72,7 @@ trace_where_pytest [pytest args...] --file FILE --line LINE --iterations N [-o O
 - `--iterations` - Number of times to hit the breakpoint before capturing stack trace (required)
 - `-o, --output_file` - Output file for trace results (optional, defaults to trace_where_pytest_output.json)
 - `--scope` - Directory path to restrict tracing to (optional, defaults to current directory)
+- `--continue` - Continue test execution after hitting the breakpoint instead of exiting (optional)
 
 ### Examples
 
@@ -93,6 +94,9 @@ trace_where train_km_simple.py -c train/llama-ql-ddcd -k finetune_task_name=6143
 
 # Trace pytest to a specific breakpoint
 trace_where_pytest tests/test_module.py::test_function
+
+# Trace pytest to a specific breakpoint and continue execution
+trace_where_pytest tests/test_module.py::test_function -v --file src/module.py --line 42 --iterations 1 --continue
 ```
 
 ## Visualization

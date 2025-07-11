@@ -8,7 +8,7 @@ import inspect
 from tracer import utils
 
 class IterationBreakpointTracer(bdb.Bdb):
-    def __init__(self, filename, lineno, max_hits, output_file, scope_path):  # Changed from scope_dir
+    def __init__(self, filename, lineno, max_hits, output_file, scope_path, continue_execution=False):  # Added continue_execution
         super().__init__()
         self.filename = os.path.abspath(filename)
         self.lineno = lineno
@@ -18,6 +18,8 @@ class IterationBreakpointTracer(bdb.Bdb):
         self.scope_path = os.path.abspath(scope_path)
         self.stack_trace = []
         self.original_command = ' '.join(sys.argv)
+        self.continue_execution = continue_execution  # Store the option
+        self.completed = False  # Track if we've completed capturing
 
         assert self.scope_path, "Scope path must be provided"
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
@@ -32,7 +34,7 @@ class IterationBreakpointTracer(bdb.Bdb):
     def user_line(self, frame):
         # Check if we've hit our breakpoint
         filename = os.path.abspath(frame.f_code.co_filename)
-        if filename == self.filename and frame.f_lineno == self.lineno:
+        if filename == self.filename and frame.f_lineno == self.lineno and not self.completed:
             self.hit_count += 1
             print(f"Hit breakpoint #{self.hit_count} at {self.filename}:{self.lineno}")
             
@@ -41,7 +43,14 @@ class IterationBreakpointTracer(bdb.Bdb):
                 self.stack_trace = self.collect_detailed_stack_trace(frame)
                 self.print_stack_trace()
                 self.save_trace()
-                sys.exit(0)
+                self.completed = True  # Mark as completed
+                
+                if not self.continue_execution:
+                    sys.exit(0)
+                else:
+                    print("\nContinuing test execution...")
+                    # Clear the breakpoint to avoid hitting it again
+                    self.clear_break(self.filename, self.lineno)
 
     def collect_detailed_stack_trace(self, frame):
         """Collect detailed information about each frame in the stack."""
@@ -245,7 +254,7 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
         }
         tracer.run(code, exec_globals, exec_globals)
 
-def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, scope_path):
+def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, scope_path, continue_execution=False):
     """Main function to run the tracer with pytest."""
     # Import pytest
     try:
@@ -260,7 +269,8 @@ def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, s
         lineno=lineno,
         max_hits=iterations,
         output_file=output_file,
-        scope_path=scope_path
+        scope_path=scope_path,
+        continue_execution=continue_execution  # Pass the option
     )
     
     print(f"Running pytest with arguments: {pytest_args}")
