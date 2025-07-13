@@ -368,10 +368,20 @@ def _is_in_scope(file_path):
     return file_path.startswith(TRACER_SCOPE)
 
 def _get_caller_info(frame):
-    """Get the caller's file and line number."""
+    """Get the caller's file and line number, skipping external calls if not tracking them."""
+    global _tracer
     try:
-        # The caller is one frame back
         caller = frame.f_back
+        
+        # If not tracking external calls, find the nearest internal caller
+        if not _tracer.track_external_calls:
+            while caller:
+                caller_path = caller.f_code.co_filename
+                if _is_in_scope(caller_path):
+                    return (caller_path, caller.f_lineno)
+                caller = caller.f_back
+        
+        # Default behavior - return immediate caller
         if caller:
             return (caller.f_code.co_filename, caller.f_lineno)
     except Exception:
