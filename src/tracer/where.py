@@ -260,8 +260,6 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
     
     print(f"Running script: {script_path}")
     print(f"With arguments: {script_args}")
-    if track_executed_lines:
-        print("Tracking executed lines within scope:", scope_path)
     
     # Execute the script
     with open(script_path, 'rb') as fp:

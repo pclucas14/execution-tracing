@@ -47,7 +47,8 @@ def trace_pytest_main():
     print(f"Output file: {args.output}")
     track_external = not args.no_external_calls
     print(f"Track external calls: {track_external}")
-    
+    print("Track executed lines:", args.track_executed_lines)
+
     start_tracing(
         scope_path=scope_path, 
         main_file=None,  # No specific main file for pytest
