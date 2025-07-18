@@ -177,6 +177,13 @@ class Tracer:
                     safe_entry[str(key)] = self._make_json_safe(value)
                 safe_log.append(safe_entry)
             
+            # Add executed lines to metadata in safe format
+            print(f'final 3')
+            if self.track_executed_lines:
+                metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
+                metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+                print(f'final 4')
+            
             output_data = {
                 "metadata": {
                     "original_command": self.original_command,
@@ -186,14 +193,7 @@ class Tracer:
                     "timestamp": __import__('datetime').datetime.now().isoformat()
                 },
                 "trace_data": safe_log
-            }
- 
-            # Add executed lines to metadata in safe format
-            print(f'final 3')
-            if self.track_executed_lines:
-                metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
-                metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
-                print(f'final 4')
+            } 
             
             return json.dumps(output_data, indent=2, default=str)
     
