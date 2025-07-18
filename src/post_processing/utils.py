@@ -231,7 +231,10 @@ class StepNode:
         trace = [increment_by_one(self.location)]
         current_node = self
         while current_node:
-            if is_importlib(current_node.parent_location):
+            if current_node.parent_location is None:
+                assert current_node.depth == 0
+                trace.append(current_node.location)
+            elif is_importlib(current_node.parent_location):
                 if current_node.up_node is None:
                     breakpoint()
                 trace.append(replace_line_no_by(current_node.up_node.location, '<import_call>'))
@@ -425,11 +428,14 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
     # at each depth
     depths = {}
 
-    for entry in raw_trace_data:
+    for index, entry in enumerate(raw_trace_data):
         previous_depth_node = depths.get(entry['depth'] - 1)
 
         if previous_depth_node is None and entry['depth'] > 0:
             print(f'Warning: No previous depth node found for depth {entry["depth"] - 1}. This might indicate a missing parent call.')
+
+        if entry['is_external']:
+            continue
 
         node = StepNode(**entry, 
                         previous_node=previous_node, 
@@ -707,7 +713,11 @@ def path_to_where(path, end_node_at_the_end=True):
     
     trace = [increment_by_one(path[0].location)]
     for i, current_node in enumerate(path):
-        if is_importlib(current_node.parent_location):
+        if current_node.parent_location is None:
+            assert current_node.depth == 0, breakpoint()
+            assert current_node is path[-1]
+            trace.append(current_node.location)
+        elif is_importlib(current_node.parent_location):
             if current_node is path[-1]:
                 # If this is the last node, we replace the line number by <import_call>
                 # We leave as-is -> will get removed 

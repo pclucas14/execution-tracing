@@ -6,9 +6,10 @@ import datetime
 import linecache
 import inspect
 from tracer import utils
+from collections import defaultdict
 
 class IterationBreakpointTracer(bdb.Bdb):
-    def __init__(self, filename, lineno, max_hits, output_file, scope_path, continue_execution=False):  # Added continue_execution
+    def __init__(self, filename, lineno, max_hits, output_file, scope_path, continue_execution=False, track_executed_lines=False):  # Added track_executed_lines
         super().__init__()
         self.filename = os.path.abspath(filename)
         self.lineno = lineno
@@ -20,6 +21,10 @@ class IterationBreakpointTracer(bdb.Bdb):
         self.original_command = ' '.join(sys.argv)
         self.continue_execution = continue_execution  # Store the option
         self.completed = False  # Track if we've completed capturing
+        
+        # Add executed lines tracking
+        self.track_executed_lines = track_executed_lines
+        self.executed_lines = defaultdict(set) 
 
         assert self.scope_path, "Scope path must be provided"
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
@@ -32,6 +37,12 @@ class IterationBreakpointTracer(bdb.Bdb):
         self.set_break(self.filename, lineno)
 
     def user_line(self, frame):
+        # Track executed lines if enabled
+        if self.track_executed_lines:
+            filename = os.path.abspath(frame.f_code.co_filename)
+            if filename.startswith(self.scope_path):
+                self.executed_lines[filename].add(frame.f_lineno)
+
         # Check if we've hit our breakpoint
         filename = os.path.abspath(frame.f_code.co_filename)
         if filename == self.filename and frame.f_lineno == self.lineno and not self.completed:
@@ -217,12 +228,17 @@ class IterationBreakpointTracer(bdb.Bdb):
             },
             "trace_data": self.stack_trace
         }
-            
+        
+        # Add executed lines if tracking was enabled
+        if self.track_executed_lines:
+            output_data["metadata"]["executed_lines_count"] = {k:list(v) for k, v in self.executed_lines.items()}
+            output_data["metadata"]["executed_lines"] = sum(len(lines) for lines in self.executed_lines.values())
+        
         with open(output_filename, 'w') as f:
             json.dump(output_data, f, indent=2, default=str)
         print(f"\nStack trace saved to: {output_filename}")
 
-def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_path, script_args):  # Changed from scope_dir
+def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_path, script_args, track_executed_lines=False):  # Added track_executed_lines
     """Main function to run the tracer."""
     # Set up sys.argv for the target script
     sys.argv = [script_path] + script_args
@@ -233,7 +249,8 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
         lineno=lineno,
         max_hits=iterations,
         output_file=output_file,
-        scope_path=scope_path  # Changed from scope_dir
+        scope_path=scope_path,  # Changed from scope_dir
+        track_executed_lines=track_executed_lines
     )
     
     # Add script directory to path
@@ -254,7 +271,7 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
         }
         tracer.run(code, exec_globals, exec_globals)
 
-def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, scope_path, continue_execution=False):
+def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, scope_path, continue_execution=False, track_executed_lines=False):
     """Main function to run the tracer with pytest."""
     # Import pytest
     try:
@@ -270,7 +287,8 @@ def main_pytest(pytest_args, breakpoint_file, lineno, iterations, output_file, s
         max_hits=iterations,
         output_file=output_file,
         scope_path=scope_path,
-        continue_execution=continue_execution  # Pass the option
+        continue_execution=continue_execution,  # Pass the option
+        track_executed_lines=track_executed_lines
     )
     
     print(f"Running pytest with arguments: {pytest_args}")

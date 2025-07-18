@@ -10,7 +10,7 @@ _call_depth = 0
 TRACER_SCOPE = None  # Directory path to restrict tracing to
 
 class Tracer:
-    def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None, track_external_calls=True, track_imports=True):
+    def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None, track_external_calls=True, track_imports=True, track_executed_lines=False):
         self.is_tracing = False
         self.log = []  # Now a list of dicts for JSON output
         self.seen_functions = set()
@@ -40,6 +40,10 @@ class Tracer:
         
         # Add function call counter
         self.function_call_counts = {}
+        
+        # Add executed lines tracking
+        self.track_executed_lines = track_executed_lines
+        self.executed_lines = {}  # Changed from set to dict: {file_name: set(line_numbers)}
 
         
     def start(self):
@@ -114,6 +118,13 @@ class Tracer:
             
         self.log.append(entry)
 
+    def log_executed_line(self, file_path, line_number):
+        """Log an executed line if tracking is enabled."""
+        if self.track_executed_lines and self.is_tracing:
+            if file_path not in self.executed_lines:
+                self.executed_lines[file_path] = set()
+            self.executed_lines[file_path].add(line_number)
+
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Deprecated: Use utils.determine_call_type instead."""
         return utils.determine_call_type(function_name, file_path, caller_info, is_external, parent_call)
@@ -142,6 +153,12 @@ class Tracer:
             
             metadata["total_frames"] = len(self.log)  # Use total_frames for consistency
             
+            # Add executed lines if tracking was enabled
+            if self.track_executed_lines:
+                # Convert dict to sorted list of tuples for JSON serialization
+                metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
+                metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+            
             output_data = {
                 "metadata": metadata,
                 "trace_data": self.log
@@ -166,6 +183,12 @@ class Tracer:
                 },
                 "trace_data": safe_log
             }
+            
+            # Add executed lines to metadata in safe format
+            if self.track_executed_lines:
+                metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
+                metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+            
             return json.dumps(output_data, indent=2, default=str)
     
     def _make_json_safe(self, obj):
@@ -397,6 +420,17 @@ def _trace_function(frame, event, arg):
         return _trace_function
     
     try:
+        # Track line execution if enabled
+        if event == 'line' and _tracer.track_executed_lines:
+            file_path = frame.f_code.co_filename
+            line_number = frame.f_lineno
+            
+            # Only track lines within scope
+            if _is_in_scope(file_path):
+                _tracer.log_executed_line(file_path, line_number)
+            
+            return _trace_function
+        
         if event == 'call':
             # Get function name and file path
             code = frame.f_code
@@ -529,7 +563,7 @@ def set_tracer_scope(scope_path):
     else:
         TRACER_SCOPE = None
 
-def start_tracing(scope_path=None, main_file=None, track_external_calls=True, track_imports=True):
+def start_tracing(scope_path=None, main_file=None, track_external_calls=True, track_imports=True, track_executed_lines=False):
     """Start tracing with a scope-limited approach."""
     global _tracer, _call_depth, TRACER_SCOPE
     
@@ -541,7 +575,7 @@ def start_tracing(scope_path=None, main_file=None, track_external_calls=True, tr
         set_tracer_scope(scope_path)
     
     # Create and start the tracer with main_file parameter and track_external_calls
-    _tracer = Tracer(scope_path=TRACER_SCOPE, main_file=main_file, track_external_calls=track_external_calls, track_imports=track_imports)
+    _tracer = Tracer(scope_path=TRACER_SCOPE, main_file=main_file, track_external_calls=track_external_calls, track_imports=track_imports, track_executed_lines=track_executed_lines)
     _tracer.start()
     
     # Install trace function

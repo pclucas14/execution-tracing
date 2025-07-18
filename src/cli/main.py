@@ -18,6 +18,8 @@ def trace_pytest_main():
                        help='Disable tracking of calls to functions outside the scope')
     parser.add_argument('--no-imports', action='store_true', 
                        help='Disable tracking of import related calls')
+    parser.add_argument('--track-executed-lines', action='store_true',
+                       help='Track all executed lines of code (file path, line number)')
     
     # Parse known args, leaving pytest args for later
     args, pytest_args = parser.parse_known_args()
@@ -49,8 +51,9 @@ def trace_pytest_main():
     start_tracing(
         scope_path=scope_path, 
         main_file=None,  # No specific main file for pytest
-        track_external_calls=track_external, 
-        track_imports=not args.no_imports
+        track_external_calls=track_external,
+        track_imports=not args.no_imports,
+        track_executed_lines=args.track_executed_lines
     )
     
     try:
@@ -73,6 +76,8 @@ def main():
                        help='Disable tracking of calls to functions outside the scope')
     parser.add_argument('--no-imports', action='store_true', 
                        help='Disable tracking of import related calls')
+    parser.add_argument('--track-executed-lines', action='store_true',
+                       help='Track all executed lines of code (file path, line number)')
     parser.add_argument('script_args', nargs='*', help='Arguments for the script being traced')
     
     args, unknown = parser.parse_known_args()
@@ -106,7 +111,7 @@ def main():
     print(f"Tracing scope: {scope_path}")
     track_external = not args.no_external_calls
     print(f"Track external calls: {track_external}")
-    start_tracing(scope_path=scope_path, main_file=script_to_trace, track_external_calls=track_external, track_imports=not args.no_imports)
+    start_tracing(scope_path=scope_path, main_file=script_to_trace, track_external_calls=track_external, track_imports=not args.no_imports, track_executed_lines=args.track_executed_lines)
     try:
         # Add script directory to path to ensure imports work
         script_dir = os.path.dirname(script_to_trace)
@@ -160,6 +165,7 @@ def where_command():
     # Optional arguments
     parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
     parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    parser.add_argument("--track-executed-lines", action="store_true", help="Track all executed lines of code (file path, line number)")
     
     # Parse known args to handle script arguments
     args, script_args = parser.parse_known_args()
@@ -198,7 +204,8 @@ def where_command():
         iterations=args.iterations,
         output_file=output_file,
         scope_path=scope_path,  # Changed from scope_dir
-        script_args=script_args
+        script_args=script_args,
+        track_executed_lines=args.track_executed_lines
     )
 
 def where_pytest_command():
@@ -218,6 +225,7 @@ def where_pytest_command():
     parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
     parser.add_argument("--continue", dest="continue_execution", action="store_true", 
                        help="Continue test execution after hitting the breakpoint (don't exit)")
+    parser.add_argument("--track-executed-lines", action="store_true", help="Track all executed lines of code (file path, line number)")
     
     # Parse known args to handle pytest arguments
     args, pytest_args = parser.parse_known_args()
@@ -254,7 +262,8 @@ def where_pytest_command():
         iterations=args.iterations,
         output_file=output_file,
         scope_path=scope_path,
-        continue_execution=args.continue_execution
+        continue_execution=args.continue_execution,
+        track_executed_lines=args.track_executed_lines
     )
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ def git_clone(repo_url, base_commit, target_dir):
     os.chdir(target_dir)
 
     # Checkout the specific commit
-    subprocess.run(['git', 'checkout', base_commit], check=True)
+    subprocess.run(['git', 'checkout',  '--force', base_commit], check=True)
 
     os.chdir(cwd)
 
@@ -104,7 +104,7 @@ if __name__ == '__main__':
         swe_info, traces = stuff
 
         # for (test_name, trace) in traces:
-        for (test_name, trace, trace_out) in traces:
+        for (test_name, trace, trace_out, diff) in traces:
             trace_data, metadata = trace['trace_data'], trace['metadata']
         
             print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
@@ -116,6 +116,9 @@ if __name__ == '__main__':
                 continue
 
             where_entries_per_test[test_name] = 0
+
+            # Clear the registry of StepLocation to avoid memory issues
+            StepLocation._registry.clear()
 
             # Build the runtime trace from the raw trace data
             start_node = build_runtime_trace(trace_data)
@@ -155,11 +158,18 @@ if __name__ == '__main__':
                 stack_trace = node.stack_trace
 
                 assert stack_trace[-1] == node
+                assert path_to_where(stack_trace) == node.where
 
                 paths = find_alternate_paths(stack_trace, max_paths=50)
+
+                # Some different alternate paths might give the same "where" location, so we filter them out
                 alternate_paths = [path for path in paths if path_to_where(path) != path_to_where(stack_trace)]
-                if len(paths) < args.min_path_amt:
-                    print(f'Node {node} has only {len(paths)} paths, skipping it.')
+
+                # Some different alternate paths might give the same "where" location as other alternate paths, so we filter them out
+                alternate_paths = [path for i, path in enumerate(alternate_paths) if path_to_where(path) not in [path_to_where(ap) for ap in alternate_paths[:i]]]
+
+                if len(alternate_paths) < args.min_path_amt:
+                    print(f'Node {node} has only {len(alternate_paths)} paths, skipping it.')
                     continue
                 else:
                     pp(stack_trace)
@@ -168,14 +178,35 @@ if __name__ == '__main__':
                 for ap in alternate_paths:
                     assert stack_trace[-1].step_location == ap[-1].step_location, breakpoint() # 
                     f"Last node in alternate path {ap[-1]} should be the same as the last node in the stack trace {stack_trace[-1]}."
+                    if stack_trace[0].step_location != ap[0].step_location:
+                        # repo_url = os.path.join(os.environ['HOME'], swe_info['repo'].split('/')[-1])
+                        # git_clone(swe_info['repo'], swe_info['base_commit'], repo_url)
+                        # apply_escaped_patch(swe_info['patch'], repo_url)
+                        # apply_escaped_patch(swe_info['test_patch'], repo_url)
+                        # breakpoint() #
+                        msg = f"First node in alternate path {ap[0]} should be the same as the first node in the stack trace {stack_trace[0]}."
+                        print(msg)
 
-                assert is_distinct_paths(alternate_paths), "There are non-distinct paths in the alternate paths."
-                
-                print(node.where)
+                # seq_alternate_paths = [to_sequence(path) for path in alternate_paths]
+                # assert is_distinct_paths(seq_alternate_paths), breakpoint() #"There are non-distinct paths in the alternate paths."
+
+                where_alternate_paths = [path_to_where(path) for path in alternate_paths]
+                assert is_distinct_paths(where_alternate_paths), breakpoint()# "There are non-distinct paths in the alternate paths (after path_to_where)."
+
+                #if '_array_api.py' in node.location:
+                #    breakpoint()
                 print('---')
-                for ap in alternate_paths:
-                    print(path_to_where(ap))
-                    print()
+                for i, ap in enumerate(alternate_paths):
+                    if path_to_where(ap) == path_to_where(stack_trace):
+                        breakpoint()
+                    if path_to_where(ap) == node.where:
+                        breakpoint()
+                        print(f'Node {node} has an alternate path that is the same as the stack trace: {path_to_where(ap)}')
+                        continue
+                    if any([path_to_where(ap) == path_to_where(app) for app in alternate_paths[i+1:]]):
+                        breakpoint()
+                        print(path_to_where(ap))
+                        print()
                 print('---')
 
                 for path in alternate_paths: 
@@ -188,6 +219,14 @@ if __name__ == '__main__':
                         print(f'Skipping node {node} because it has contextlib in the alternate paths.')
                         continue
 
+                for i, path in enumerate(alternate_paths):
+                    for j, opath in enumerate(alternate_paths[i+1:]):
+                        if path_to_where(path) == path_to_where(opath):
+                            print(f'Found duplicate alternate paths: {path_to_where(path)} and {path_to_where(opath)}')
+                            breakpoint()
+                            continue
+
+
                 where_entry = {
                     'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
                     'alternate_paths': [path_to_where(path) for path in alternate_paths],     # [[node.to_dict() for node in path] for path in alternate_paths],
@@ -195,10 +234,12 @@ if __name__ == '__main__':
                     'repo': swe_info['repo'],
                     'instance_id': swe_info['instance_id'],
                     'base_commit': swe_info['base_commit'],
+                    'patch' : swe_info['patch'],
+                    'test_patch': swe_info['test_patch'],
                     'test_name': test_name,
                     'is_first': node.is_first_call,
                     'is_last': node.is_last_call,
-                    'og_stack_trace': node.stack_trace,
+                    'og_stack_trace': to_sequence(node.stack_trace),
                     'og_alternate_paths': [to_sequence(path) for path in alternate_paths],
                 }
                 where_entries.append(where_entry)
