@@ -120,10 +120,12 @@ class Tracer:
 
     def log_executed_line(self, file_path, line_number):
         """Log an executed line if tracking is enabled."""
+        print('enter')
         if self.track_executed_lines and self.is_tracing:
             if file_path not in self.executed_lines:
                 self.executed_lines[file_path] = set()
             self.executed_lines[file_path].add(line_number)
+            print(f'Executed line {line_number} in {file_path}')
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Deprecated: Use utils.determine_call_type instead."""
@@ -154,10 +156,12 @@ class Tracer:
             metadata["total_frames"] = len(self.log)  # Use total_frames for consistency
             
             # Add executed lines if tracking was enabled
+            print('final 1')
             if self.track_executed_lines:
                 # Convert dict to sorted list of tuples for JSON serialization
                 metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
                 metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+                print('final 2')
             
             output_data = {
                 "metadata": metadata,
@@ -183,11 +187,13 @@ class Tracer:
                 },
                 "trace_data": safe_log
             }
-            
+ 
             # Add executed lines to metadata in safe format
+            print(f'final 3')
             if self.track_executed_lines:
                 metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
                 metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+                print(f'final 4')
             
             return json.dumps(output_data, indent=2, default=str)
     
@@ -426,6 +432,7 @@ def _trace_function(frame, event, arg):
             line_number = frame.f_lineno
             
             # Only track lines within scope
+            print(f'check scope')
             if _is_in_scope(file_path):
                 _tracer.log_executed_line(file_path, line_number)
             
