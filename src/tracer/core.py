@@ -121,12 +121,10 @@ class Tracer:
 
     def log_executed_line(self, file_path, line_number):
         """Log an executed line if tracking is enabled."""
-        print('enter')
         if self.track_executed_lines and self.is_tracing:
             if file_path not in self.executed_lines:
                 self.executed_lines[file_path] = set()
             self.executed_lines[file_path].add(line_number)
-            print(f'Executed line {line_number} in {file_path}')
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Deprecated: Use utils.determine_call_type instead."""
