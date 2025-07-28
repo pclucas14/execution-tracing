@@ -1,3 +1,4 @@
+import re
 import json
 import site
 import random
@@ -729,3 +730,50 @@ def path_to_where(path, end_node_at_the_end=True):
         else:
             trace.append(current_node.parent_location)
     return trace[::-1][1:]
+
+def tab_print(text, indent_size=2):
+    """
+    Transform and print code with proper tabs and carriage returns for enhanced readability.
+    
+    Args:
+        text (str): The text/code to format and print
+        indent_size (int): Number of spaces per indentation level (default: 2)
+    """
+    if isinstance(text, list):
+        text = ''.join(text)
+
+    # Replace literal \n with actual newlines
+    formatted_text = text.replace('\\n', '\n')
+    
+    lines = formatted_text.split('\n')
+    formatted_lines = []
+    
+    for line in lines:
+        # Skip empty lines but preserve them
+        if not line.strip():
+            formatted_lines.append('')
+            continue
+            
+        # Count leading spaces to determine indentation level
+        stripped_line = line.lstrip()
+        leading_spaces = len(line) - len(stripped_line)
+        
+        # Convert spaces to proper indentation
+        indent_level = leading_spaces // indent_size if leading_spaces > 0 else 0
+        proper_indent = '    ' * indent_level  # Use 4 spaces per indent level
+        
+        # Handle special file markers
+        if stripped_line.startswith('[FILE:'):
+            formatted_lines.append('\n' + '=' * 60)
+            formatted_lines.append(stripped_line)
+            formatted_lines.append('=' * 60)
+        else:
+            formatted_lines.append(proper_indent + stripped_line)
+    
+    # Join lines and print
+    formatted_output = '\n'.join(formatted_lines)
+    
+    # Clean up excessive newlines (more than 2 consecutive)
+    formatted_output = re.sub(r'\n{3,}', '\n\n', formatted_output)
+    
+    print(formatted_output)
