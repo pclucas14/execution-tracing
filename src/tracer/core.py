@@ -430,7 +430,6 @@ def _trace_function(frame, event, arg):
             line_number = frame.f_lineno
             
             # Only track lines within scope
-            print(f'check scope')
             if _is_in_scope(file_path):
                 _tracer.log_executed_line(file_path, line_number)
             
