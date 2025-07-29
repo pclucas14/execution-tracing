@@ -44,7 +44,6 @@ class Tracer:
         
         # Add executed lines tracking
         self.track_executed_lines = track_executed_lines
-        self.executed_lines = {}  # Changed from set to dict: {file_name: set(line_numbers)}
 
         
     def start(self):
@@ -101,6 +100,7 @@ class Tracer:
         formatted_args = utils.format_arguments(args)
 
         entry = {
+            "event": "function_call",  # <-- Add event attribute for function calls
             "location": location,
             "parent_location": parent_location,
             "parent_call": parent_call,  # Add the actual code that made this call
@@ -120,11 +120,14 @@ class Tracer:
         self.log.append(entry)
 
     def log_executed_line(self, file_path, line_number):
-        """Log an executed line if tracking is enabled."""
+        """Log an executed line as an event in the main log."""
         if self.track_executed_lines and self.is_tracing:
-            if file_path not in self.executed_lines:
-                self.executed_lines[file_path] = set()
-            self.executed_lines[file_path].add(line_number)
+            entry = {
+                "event": "executed_line",
+                "file": file_path,
+                "line": line_number
+            }
+            self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Deprecated: Use utils.determine_call_type instead."""
@@ -154,11 +157,11 @@ class Tracer:
             
             metadata["total_frames"] = len(self.log)  # Use total_frames for consistency
             
-            # Add executed lines if tracking was enabled
+            # Remove: executed_lines and executed_lines_count from metadata
+            # Instead, count executed_line events if needed
             if self.track_executed_lines:
-                # Convert dict to sorted list of tuples for JSON serialization
-                metadata["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
-                metadata["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())
+                executed_line_events = [entry for entry in self.log if entry.get("event") == "executed_line"]
+                metadata["executed_lines_count"] = len(executed_line_events)
             
             output_data = {
                 "metadata": metadata,
@@ -187,9 +190,8 @@ class Tracer:
             } 
             
             if self.track_executed_lines:
-                output_data["metadata"]["executed_lines"] = {k:list(v) for k, v in self.executed_lines.items()}
-                output_data["metadata"]["executed_lines_count"] = sum(len(lines) for lines in self.executed_lines.values())  
-            
+                executed_line_events = [entry for entry in safe_log if entry.get("event") == "executed_line"]
+                output_data["metadata"]["executed_lines_count"] = len(executed_line_events)
             return json.dumps(output_data, indent=2, default=str)
     
     def _make_json_safe(self, obj):
@@ -424,10 +426,14 @@ def _trace_function(frame, event, arg):
         return _trace_function
     
     try:
+        file_path = frame.f_code.co_filename
+        line_number = frame.f_lineno
+        
+        # standardize the file_path : e.g. "test_repo/test/../src/main.py" should be standardized to "test_repo/src/main.py"
+        file_path = os.path.normpath(file_path)
+        
         # Track line execution if enabled
         if event == 'line' and _tracer.track_executed_lines:
-            file_path = frame.f_code.co_filename
-            line_number = frame.f_lineno
             
             # Only track lines within scope
             if _is_in_scope(file_path):
@@ -439,8 +445,6 @@ def _trace_function(frame, event, arg):
             # Get function name and file path
             code = frame.f_code
             func_name = code.co_name
-            file_path = code.co_filename
-            line_number = frame.f_lineno
             
             # Get caller information
             caller_info = _get_caller_info(frame)
@@ -542,7 +546,6 @@ def _trace_function(frame, event, arg):
             # Only decrement if we're in scope and this was a traced call
             if _tracer.scope_entered and _tracer.in_scope_depth > 0:
                 code = frame.f_code
-                file_path = code.co_filename
                 func_name = code.co_name
                 
                 # Check if this return matches a traced call (only for in-scope functions)
