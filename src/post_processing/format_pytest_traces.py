@@ -3,11 +3,29 @@ import random
 import sys
 import os
 import numpy as np
+import re
+from collections import defaultdict
 
-from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, path_to_where, find_alternate_paths
+
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, path_to_where, find_alternate_paths, tab_print
 
 import subprocess
 import os
+
+def to_jsonl(data, output_path):
+    """
+    Save data to a JSONL file.
+    """
+    with open(output_path, 'w') as f:
+        for entry in data:
+            f.write(json.dumps(entry) + '\n')
+
+def to_json(data, output_path):
+    """
+    Save data to a JSON file.
+    """
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=2)
 
 def apply_escaped_patch(patch_string: str, root_dir: str):
     """
@@ -64,10 +82,44 @@ def git_clone(repo_url, base_commit, target_dir):
     os.chdir(cwd)
 
 
-def get_repo_url(image_name):
-    image_name = image_name.split('swesmith.x86_64.')[1].split(':')[0]
-    repo_url = f"https://github.com/swesmith/{image_name}"
-    return repo_url
+def get_files_from_patch(patch_text):
+    lines = patch_text.splitlines()
+    modified_lines_by_file = defaultdict(list)
+
+    current_file = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Detect file name from diff -- only care about the new file
+        if line.startswith('+++ '):
+            path = line[4:].strip()
+            if path != '/dev/null':
+                # Remove a/ or b/ prefix if present
+                current_file = re.sub(r'^[ab]/', '', path)
+
+        # Detect diff hunk
+        hunk_match = re.match(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
+        if hunk_match and current_file:
+            new_start = int(hunk_match.group(1))
+            i += 1
+            curr_line = new_start
+            while i < len(lines) and not lines[i].startswith('@@') and not lines[i].startswith('diff '):
+                patch_line = lines[i]
+                if patch_line.startswith('+') and not patch_line.startswith('+++'):
+                    modified_lines_by_file[current_file].append(curr_line)
+                    curr_line += 1
+                elif patch_line.startswith('-') and not patch_line.startswith('---'):
+                    # deletion: doesn't increment new file line number
+                    pass
+                else:
+                    # context line
+                    curr_line += 1
+                i += 1
+        else:
+            i += 1
+
+    return dict(modified_lines_by_file)
 
 if __name__ == '__main__':
     # argparse, with arg --trace_files, array of string paths to files
@@ -103,17 +155,21 @@ if __name__ == '__main__':
     for stuff in all_traces:
         swe_info, traces = stuff
 
+        patched_files = get_files_from_patch(swe_info['patch'])
+
         # for (test_name, trace) in traces:
-        for (test_name, trace, trace_out, diff) in traces:
+        for (test_name, trace, trace_out) in traces:
+        # for (test_name, trace, trace_out, diff) in traces:
             trace_data, metadata = trace['trace_data'], trace['metadata']
+            metadata['executed_lines'] = {k.replace('/testbed/', ''): v for k, v in metadata['executed_lines'].items()}
         
             print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
 
             test_file = test_name.split('::')[0]
 
-            if not any([test_file in step['location'] and step['call_type'] == 'function_call' for step in trace_data]):
-                print(f'Skipping trace for test: {test_name} in repo: {swe_info["repo"]} because it has no function calls in the trace data.')
-                continue
+            #if not any([test_file in step['location'] and step['call_type'] == 'function_call' for step in trace_data]):
+            #    print(f'Skipping trace for test: {test_name} in repo: {swe_info["repo"]} because it has no function calls in the trace data.')
+            #    continue
 
             where_entries_per_test[test_name] = 0
 
@@ -126,6 +182,22 @@ if __name__ == '__main__':
             print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
 
             runtime_traces = start_node.runtime_trace
+            touched_files = defaultdict(set)
+            for entry in runtime_traces:
+                parts = entry.location.split(':')
+                file_name = parts[0]
+                line = parts[1] if len(parts) > 1 else '0'  # Default to line 0 if not specified
+                touched_files[file_name].add(int(line))
+                
+            # check if patched_files and touched_files overlap
+            if any([file in patched_files for file in touched_files.keys()]):
+                print(f'Found patched files in touched files for test: {test_name} in repo: {swe_info["repo"]}')
+            else:
+                print(f'No patched files found in touched files for test: {test_name} in repo: {swe_info["repo"]}')
+                if len(patched_files) > 0:
+                    breakpoint()
+                continue
+            
             depths = np.bincount([node.depth for node in runtime_traces])
             print(depths)
 
@@ -136,13 +208,16 @@ if __name__ == '__main__':
             # 1) the first calls to a given StepLocation
             # 2) the last calls to a given StepLocation 
 
+            #filtered_nodes = runtime_traces
             filtered_nodes = [node for node in runtime_traces if node.call_type == 'function_call']
-            filtered_nodes = [node for node in filtered_nodes if node.is_first_call or node.is_last_call]
+            # filtered_nodes = [node for node in filtered_nodes if node.is_first_call or node.is_last_call]
             filtered_nodes = [node for node in filtered_nodes if not node.is_external]  # Exclude external calls
             
             print(f'Found {len(filtered_nodes)} nodes after filtering for first and last calls') 
-            filtered_nodes = [x for x in filtered_nodes if any([test_file in y.location for y in x.stack_trace])]
-            print(f'Found {len(filtered_nodes)} nodes after filtering for test file {test_file}.')
+            
+            # Filter by the 'patch' instead (done later)
+            # filtered_nodes = [x for x in filtered_nodes if any([test_file in y.location for y in x.stack_trace])]
+            # print(f'Found {len(filtered_nodes)} nodes after filtering for test file {test_file}.')
 
             # 3) are leaf nodes 
             # 4) potentially restrict the amount of sibling nodes
@@ -159,6 +234,30 @@ if __name__ == '__main__':
 
                 assert stack_trace[-1] == node
                 assert path_to_where(stack_trace) == node.where
+
+                # make sure that at least one file in node.where is in the patched files
+                found = False
+                for file_and_line in node.where:
+                    file, line = file_and_line.split(':')
+                    # Check if the current line or any nearby lines (-2 to +2) are in the patched files
+                    found = False
+                    for i in range(-2, 3):
+                        # check if line is a number
+                        if not line.isdigit():
+                            print(f'Skipping node {node} because line {line} is not a number.')
+                            found = True
+                            break
+                        if (int(line) + i) in patched_files.get(file, []):
+                            found = True
+                            break
+                    
+                    if file in patched_files:
+                        found = True
+                        break
+
+                if not found:
+                    print(f'NOTE : node not close to the patched files.')
+                    continue
 
                 paths = find_alternate_paths(stack_trace, max_paths=50)
 
@@ -226,7 +325,6 @@ if __name__ == '__main__':
                             breakpoint()
                             continue
 
-
                 where_entry = {
                     'stack_trace': node.where, #[node.to_dict() for node in stack_trace],
                     'alternate_paths': [path_to_where(path) for path in alternate_paths],     # [[node.to_dict() for node in path] for path in alternate_paths],
@@ -241,6 +339,7 @@ if __name__ == '__main__':
                     'is_last': node.is_last_call,
                     'og_stack_trace': to_sequence(node.stack_trace),
                     'og_alternate_paths': [to_sequence(path) for path in alternate_paths],
+                    'executed_lines': metadata['executed_lines'],
                 }
                 where_entries.append(where_entry)
                 where_entries_per_test[test_name] += 1
