@@ -122,12 +122,20 @@ class Tracer:
     def log_executed_line(self, file_path, line_number):
         """Log an executed line as an event in the main log."""
         if self.track_executed_lines and self.is_tracing:
-            entry = {
-                "event": "executed_line",
-                "file": file_path,
-                "line": line_number
-            }
-            self.log.append(entry)
+            # If the last log entry is an executed_line event for the same file, append to its lines list
+            if (
+                self.log
+                and self.log[-1].get("event") == "executed_line"
+                and self.log[-1].get("file") == file_path
+            ):
+                self.log[-1]["lines"].append(line_number)
+            else:
+                entry = {
+                    "event": "executed_line",
+                    "file": file_path,
+                    "lines": [line_number]
+                }
+                self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
         """Deprecated: Use utils.determine_call_type instead."""
