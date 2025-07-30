@@ -439,6 +439,10 @@ def _trace_function(frame, event, arg):
         
         # standardize the file_path : e.g. "test_repo/test/../src/main.py" should be standardized to "test_repo/src/main.py"
         file_path = os.path.normpath(file_path)
+
+        # now, express the file_path relative to the scope
+        if _tracer.scope_path:
+            file_path = os.path.relpath(file_path, _tracer.scope_path)
         
         # Track line execution if enabled
         if event == 'line' and _tracer.track_executed_lines:
