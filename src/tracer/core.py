@@ -9,6 +9,33 @@ _tracer = None
 _call_depth = 0
 TRACER_SCOPE = None  # Directory path to restrict tracing to
 
+def _is_comment_or_docstring_line(stripped: str) -> bool:
+    """Heuristically detect comment-only lines and standalone string literals (docstrings/block comments)."""
+    if not stripped:
+        return False
+    if stripped.startswith('#'):
+        return True
+    # Common literal prefixes for docstrings/block strings
+    prefixes = ('r', 'u', 'f', 'b', 'R', 'U', 'F', 'B')
+    i = 0
+    while i < len(stripped) and stripped[i] in prefixes:
+        i += 1
+    if i < len(stripped) and stripped[i:i+1] in ('"', "'"):
+        return True
+    return stripped.startswith(('"""', "'''"))
+
+def _is_unconditional_control_header(stripped: str) -> bool:
+    """Detect module-level block headers that have no runtime effect themselves."""
+    if stripped.startswith('try:'):
+        return True
+    if stripped.startswith('except') and stripped.rstrip().endswith(':'):
+        return True
+    if stripped.startswith('finally:'):
+        return True
+    if stripped.startswith('else:'):
+        return True
+    return False
+
 class Tracer:
     def __init__(self, scope_path=None, exclude_paths=None, output_file=None, main_file=None, track_external_calls=True, track_imports=True, track_executed_lines=False, collect_arg_values=True):
         self.is_tracing = False
@@ -119,26 +146,31 @@ class Tracer:
             
         self.log.append(entry)
 
-    def log_executed_line(self, file_path, line_number):
-        """Log an executed line as an event in the main log."""
-
+    def log_executed_line(self, file_path, line_number, func_name=None, context=None, code=None):
+        """Log an executed line as an event in the main log, with context."""
         # standardize `file_path` relative to the scope
         file_path = utils.get_relative_path(file_path, self.scope_path)
 
         if self.track_executed_lines and self.is_tracing:
-            # If the last log entry is an executed_line event for the same file, append to its lines list
+            # Group only when file, function, and context match
             if (
                 self.log
                 and self.log[-1].get("event") == "executed_line"
                 and self.log[-1].get("file") == file_path
+                and self.log[-1].get("function") == (func_name or "<module>")
+                and self.log[-1].get("context") == (context or "unknown")
             ):
                 self.log[-1]["lines"].append(line_number)
             else:
                 entry = {
                     "event": "executed_line",
                     "file": file_path,
-                    "lines": [line_number]
+                    "function": func_name or "<module>",
+                    "context": context or "unknown",
+                    "lines": [line_number],
                 }
+                if code is not None:
+                    entry["code"] = code.strip("\n")
                 self.log.append(entry)
 
     def _classify_call_type(self, function_name, file_path, caller_info, is_external, parent_call=None):
@@ -446,13 +478,41 @@ def _trace_function(frame, event, arg):
 
         # Track line execution if enabled
         if event == 'line' and _tracer.track_executed_lines:
-            
-            # Only track lines within scope
             if _is_in_scope(file_path):
-                _tracer.log_executed_line(file_path, line_number)
-            
+                code_obj = frame.f_code
+                func_name = code_obj.co_name
+                src_line = utils.get_source_line(frame)
+                stripped = (src_line or "").lstrip()
+
+                if _is_comment_or_docstring_line(stripped):
+                    context = 'comment'
+                elif func_name == '<module>':
+                    if stripped.startswith('def ') or stripped.startswith('class ') or stripped.startswith('@'):
+                        context = 'definition'
+                    elif stripped.startswith('import ') or stripped.startswith('from '):
+                        context = 'import'
+                    elif _is_unconditional_control_header(stripped):
+                        context = 'control'
+                    else:
+                        context = 'module_runtime'
+                else:
+                    context = "function_runtime"
+                    try:
+                        qn = frame.f_locals.get('__qualname__')
+                        if qn and code_obj.co_name == qn.split('.')[-1] and '__module__' in frame.f_locals:
+                            context = 'class_body'
+                    except Exception:
+                        pass
+
+                _tracer.log_executed_line(
+                    file_path,
+                    line_number,
+                    func_name=func_name,
+                    context=context,
+                    code=src_line
+                )
             return _trace_function
-        
+
         if event == 'call':
             # Get function name and file path
             code = frame.f_code
@@ -511,15 +571,12 @@ def _trace_function(frame, event, arg):
                     for arg_name in args.args:
                         if arg_name in args.locals:
                             arg_values[arg_name] = args.locals[arg_name]
-                
-                    # Add varargs and kwargs
+                    # FIX: use dict indexing, not call
                     if args.varargs and args.varargs in args.locals:
                         arg_values['*' + args.varargs] = args.locals[args.varargs]
-                    
                     if args.keywords and args.keywords in args.locals:
                         arg_values['**' + args.keywords] = args.locals[args.keywords]
                 except Exception:
-                    # Silently fail if we can't get args
                     arg_values = {"error": "Could not extract arguments"}
 
             # Calculate depth properly
