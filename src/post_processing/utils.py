@@ -83,6 +83,7 @@ class StepNode:
         call_type=None,
         is_external=False,
         step_location=None,
+        executed_lines=None,
         *args,
         **kwargs
     ):
@@ -113,6 +114,8 @@ class StepNode:
         self.down_nodes = down_nodes if down_nodes is not None else []
         self._runtime_trace = None  # Lazy loading of runtime trace
 
+        self.executed_lines = executed_lines
+        
     @property
     def location(self):
         return self.step_location.location
@@ -229,8 +232,10 @@ class StepNode:
                     return loc
             return None
 
+
         trace = [increment_by_one(self.location)]
         current_node = self
+        path = []
         while current_node:
             if current_node.parent_location is None:
                 assert current_node.depth == 0
@@ -243,10 +248,13 @@ class StepNode:
                 # This is to avoid going too deep into the import resolution
             else:
                 trace.append(current_node.parent_location)
+            path.append(current_node)
             current_node = current_node.up_node
-       
-        trace = trace[::-1]
-        return trace[1:]
+
+        where = [x.executed_lines[-1] for x in path if x and x.executed_lines]
+        trace = trace[::-1][1:]
+
+        return trace
 
     @property
     def runtime_trace(self):
@@ -429,7 +437,14 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
     # at each depth
     depths = {}
 
+
+    executed_lines = []
     for index, entry in enumerate(raw_trace_data):
+        if entry['event'] == 'executed_line':
+            for line_no in entry['lines']:
+                executed_lines.append(f"{entry['file']}:{line_no}")
+            continue
+
         previous_depth_node = depths.get(entry['depth'] - 1)
 
         if previous_depth_node is None and entry['depth'] > 0:
@@ -438,9 +453,12 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
         if entry['is_external']:
             continue
 
-        node = StepNode(**entry, 
-                        previous_node=previous_node, 
-                        up_node=previous_depth_node)
+        node = StepNode(
+            **entry, 
+            previous_node=previous_node, 
+            up_node=previous_depth_node,
+            executed_lines=executed_lines
+            )
 
         # Update the previous node
         if not previous_node:
@@ -455,6 +473,9 @@ def build_runtime_trace(raw_trace_data: list[Dict[str, Any]]) -> StepNode:
 
         # Update the latest node at this depth
         depths[node.depth] = node
+
+        # reset executed lines
+        executed_lines = []
 
     return root_node
 
@@ -687,7 +708,7 @@ def path_to_where(path, end_node_at_the_end=True):
     # Namely, 1) 1 node deeper because "root".parent_location is also added
     # Use `child.parent_location` instead of self.location -> this is aligned with pdb where
     # For the last node, we increment the line number by 1 (as if we set a breakpoint on the next line)
-    
+
     if end_node_at_the_end:
         path = path[::-1]
 
@@ -699,6 +720,11 @@ def path_to_where(path, end_node_at_the_end=True):
             else:
                 return loc
         return None
+
+    #where = [x.executed_lines[-1] for x in path]
+    # increment by 1 the deepest location
+    #where[0] = increment_by_one(where[0])
+    #where = where[::-1]
         
     def is_importlib(loc):
         return 'import' in loc or 'importlib_' in loc
@@ -729,7 +755,9 @@ def path_to_where(path, end_node_at_the_end=True):
             # This is to avoid going too deep into the import resolution
         else:
             trace.append(current_node.parent_location)
-    return trace[::-1][1:]
+    
+    trace = trace[::-1][1:]
+    return trace
 
 def tab_print(text, indent_size=2):
     """
@@ -777,3 +805,31 @@ def tab_print(text, indent_size=2):
     formatted_output = re.sub(r'\n{3,}', '\n\n', formatted_output)
     
     print(formatted_output)
+
+def print_stack_traces(stack_nodes, patched_files={}):
+    """
+    Print the full stack trace of the program from a list of StepNodes.
+    Indent according to depth, and only print parent_call and parent_location.
+    Highlight lines from patched_files with *** ***.
+    """
+    for node in stack_nodes:
+        depth = getattr(node, 'depth', 0)
+        indent = '    ' * depth
+        parent_call = getattr(node, 'parent_call', None)
+        parent_location = getattr(node, 'parent_location', None)
+
+        # Highlight if parent_location is in patched_files
+        highlight = []
+        for file_and_line in node.executed_lines:
+            for file, lines in patched_files.items():
+                for line in lines:
+                    if file_and_line == f"{file}:{line}":
+                        highlight.append(file_and_line)
+
+        if highlight:
+            for line in highlight:
+                # print a checkmark before the line
+                print(f"✔ {line} ***")
+
+        print(f"{indent}parent_call: {parent_call}")
+        print(f"{indent}parent_location: {parent_location}")

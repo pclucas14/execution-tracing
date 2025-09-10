@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 
 
-from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, path_to_where, find_alternate_paths, tab_print
+from post_processing.utils import build_runtime_trace, to_sequence, is_distinct_paths, read_jsonl_file, StepLocation, pp, path_to_where, find_alternate_paths, tab_print, print_stack_traces
 
 import subprocess
 import os
@@ -121,6 +121,19 @@ def get_files_from_patch(patch_text):
 
     return dict(modified_lines_by_file)
 
+def set_executed_lines(trace):
+    trace_data, metadata = trace['trace_data'], trace['metadata']
+    trace['metadata']['executed_lines'] = defaultdict(set)
+    for entry in trace_data:
+        if entry.get('event', '') == 'executed_line':
+            file_path = entry['file']
+            for line in entry['lines']:
+                trace['metadata']['executed_lines'][file_path].add(line)
+    
+    # Convert sets to sorted lists for consistency
+    for file_path in trace['metadata']['executed_lines']:
+        trace['metadata']['executed_lines'][file_path] = sorted(list(trace['metadata']['executed_lines'][file_path]))
+
 if __name__ == '__main__':
     # argparse, with arg --trace_files, array of string paths to files
     import argparse
@@ -159,7 +172,9 @@ if __name__ == '__main__':
 
         # for (test_name, trace) in traces:
         for (test_name, trace, trace_out) in traces:
-        # for (test_name, trace, trace_out, diff) in traces:
+            set_executed_lines(trace)
+            
+            # for (test_name, trace, trace_out, diff) in traces:
             trace_data, metadata = trace['trace_data'], trace['metadata']
             metadata['executed_lines'] = {k.replace('/testbed/', ''): v for k, v in metadata['executed_lines'].items()}
         
@@ -182,6 +197,10 @@ if __name__ == '__main__':
             print(f'Processing trace for test: {test_name} in repo: {swe_info["repo"]})')
 
             runtime_traces = start_node.runtime_trace
+            print_stack_traces(runtime_traces, patched_files=patched_files)
+            breakpoint()
+
+
             touched_files = defaultdict(set)
             for entry in runtime_traces:
                 parts = entry.location.split(':')
@@ -237,22 +256,13 @@ if __name__ == '__main__':
 
                 # make sure that at least one file in node.where is in the patched files
                 found = False
-                for file_and_line in node.where:
-                    file, line = file_and_line.split(':')
-                    # Check if the current line or any nearby lines (-2 to +2) are in the patched files
-                    found = False
-                    for i in range(-2, 3):
-                        # check if line is a number
-                        if not line.isdigit():
-                            print(f'Skipping node {node} because line {line} is not a number.')
+                for anode in node.stack_trace:
+                    for file_and_line in anode.executed_lines:
+                        file, line = file_and_line.split(':')
+                        if int(line) in patched_files.get(file, []):
                             found = True
                             break
-                        if (int(line) + i) in patched_files.get(file, []):
-                            found = True
-                            break
-                    
-                    if file in patched_files:
-                        found = True
+                    if found:
                         break
 
                 if not found:
