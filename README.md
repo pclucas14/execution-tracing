@@ -34,6 +34,11 @@ trace_pytest [pytest arguments...] [-o OUTPUT] [--scope SCOPE] [--no-external-ca
 trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]
 ```
 
+#### Tracing pytest to a specific breakpoint
+```bash
+trace_where_pytest [pytest args...] --file FILE --line LINE --iterations N [-o OUTPUT] [--scope SCOPE]
+```
+
 ### Command Line Options
 
 #### trace_program
@@ -60,6 +65,15 @@ trace_where <script_to_run.py> [script args...] --file FILE --line LINE --iterat
 - `--scope` - Directory path to restrict tracing to (optional)
 - Script arguments are passed directly to the script being traced
 
+#### trace_where_pytest
+- `pytest_args` - All pytest arguments (test files, options, etc.)
+- `--file` - File where to set the breakpoint (required)
+- `--line` - Line number for the breakpoint (required)
+- `--iterations` - Number of times to hit the breakpoint before capturing stack trace (required)
+- `-o, --output_file` - Output file for trace results (optional, defaults to trace_where_pytest_output.json)
+- `--scope` - Directory path to restrict tracing to (optional, defaults to current directory)
+- `--continue` - Continue test execution after hitting the breakpoint instead of exiting (optional)
+
 ### Examples
 
 ```bash
@@ -77,6 +91,12 @@ trace_pytest tests/test_module.py::test_function -v --no-external-calls
 
 # Trace to a specific breakpoint
 trace_where train_km_simple.py -c train/llama-ql-ddcd -k finetune_task_name=61430 --file utils/simple_utils.py --line 12 --iterations 1 -o breakpoint_trace.json --scope ~/msr_mttl/projects/kms
+
+# Trace pytest to a specific breakpoint
+trace_where_pytest tests/test_module.py::test_function
+
+# Trace pytest to a specific breakpoint and continue execution
+trace_where_pytest tests/test_module.py::test_function -v --file src/module.py --line 42 --iterations 1 --continue
 ```
 
 ## Visualization

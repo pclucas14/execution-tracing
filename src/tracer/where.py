@@ -6,9 +6,10 @@ import datetime
 import linecache
 import inspect
 from tracer import utils
+from collections import defaultdict
 
 class IterationBreakpointTracer(bdb.Bdb):
-    def __init__(self, filename, lineno, max_hits, output_file, scope_path):  # Changed from scope_dir
+    def __init__(self, filename, lineno, max_hits, output_file, scope_path, continue_execution=False, track_executed_lines=False):  # Added track_executed_lines
         super().__init__()
         self.filename = os.path.abspath(filename)
         self.lineno = lineno
@@ -18,16 +19,33 @@ class IterationBreakpointTracer(bdb.Bdb):
         self.scope_path = os.path.abspath(scope_path)
         self.stack_trace = []
         self.original_command = ' '.join(sys.argv)
+        self.continue_execution = continue_execution  # Store the option
+        self.completed = False  # Track if we've completed capturing
+        
+        # Add executed lines tracking
+        self.track_executed_lines = track_executed_lines
+        self.executed_lines = defaultdict(set) 
 
         assert self.scope_path, "Scope path must be provided"
         print(f"Setting breakpoint at {self.filename}:{self.lineno}")
         print(f"Scope path: {self.scope_path}")  # Changed from scope_dir
+        
+        # Reset the debugger to initialize all required attributes
+        self.reset()
+        
+        # Now set the breakpoint
         self.set_break(self.filename, lineno)
 
     def user_line(self, frame):
+        # Track executed lines if enabled
+        if self.track_executed_lines:
+            filename = os.path.abspath(frame.f_code.co_filename)
+            if filename.startswith(self.scope_path):
+                self.executed_lines[filename].add(frame.f_lineno)
+
         # Check if we've hit our breakpoint
         filename = os.path.abspath(frame.f_code.co_filename)
-        if filename == self.filename and frame.f_lineno == self.lineno:
+        if filename == self.filename and frame.f_lineno == self.lineno and not self.completed:
             self.hit_count += 1
             print(f"Hit breakpoint #{self.hit_count} at {self.filename}:{self.lineno}")
             
@@ -36,7 +54,14 @@ class IterationBreakpointTracer(bdb.Bdb):
                 self.stack_trace = self.collect_detailed_stack_trace(frame)
                 self.print_stack_trace()
                 self.save_trace()
-                sys.exit(0)
+                self.completed = True  # Mark as completed
+                
+                if not self.continue_execution:
+                    sys.exit(0)
+                else:
+                    print("\nContinuing test execution...")
+                    # Clear the breakpoint to avoid hitting it again
+                    self.clear_break(self.filename, self.lineno)
 
     def collect_detailed_stack_trace(self, frame):
         """Collect detailed information about each frame in the stack."""
@@ -203,12 +228,17 @@ class IterationBreakpointTracer(bdb.Bdb):
             },
             "trace_data": self.stack_trace
         }
-            
+        
+        # Add executed lines if tracking was enabled
+        if self.track_executed_lines:
+            output_data["metadata"]["executed_lines_count"] = {k:list(v) for k, v in self.executed_lines.items()}
+            output_data["metadata"]["executed_lines"] = sum(len(lines) for lines in self.executed_lines.values())
+        
         with open(output_filename, 'w') as f:
             json.dump(output_data, f, indent=2, default=str)
         print(f"\nStack trace saved to: {output_filename}")
 
-def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_path, script_args):  # Changed from scope_dir
+def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_path, script_args, track_executed_lines=False):  # Added track_executed_lines
     """Main function to run the tracer."""
     # Set up sys.argv for the target script
     sys.argv = [script_path] + script_args
@@ -219,7 +249,8 @@ def main(script_path, breakpoint_file, lineno, iterations, output_file, scope_pa
         lineno=lineno,
         max_hits=iterations,
         output_file=output_file,
-        scope_path=scope_path  # Changed from scope_dir
+        scope_path=scope_path,  # Changed from scope_dir
+        track_executed_lines=track_executed_lines
     )
     
     # Add script directory to path

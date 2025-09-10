@@ -18,6 +18,10 @@ def trace_pytest_main():
                        help='Disable tracking of calls to functions outside the scope')
     parser.add_argument('--no-imports', action='store_true', 
                        help='Disable tracking of import related calls')
+    parser.add_argument('--track-executed-lines', action='store_true',
+                       help='Track all executed lines of code (file path, line number)')
+    parser.add_argument('--no-arg-values', action='store_true',
+                       help="Dont store function argument values in the trace")
     
     # Parse known args, leaving pytest args for later
     args, pytest_args = parser.parse_known_args()
@@ -45,12 +49,15 @@ def trace_pytest_main():
     print(f"Output file: {args.output}")
     track_external = not args.no_external_calls
     print(f"Track external calls: {track_external}")
-    
+    print("Track executed lines:", args.track_executed_lines)
+
     start_tracing(
         scope_path=scope_path, 
         main_file=None,  # No specific main file for pytest
-        track_external_calls=track_external, 
-        track_imports=not args.no_imports
+        track_external_calls=track_external,
+        track_imports=not args.no_imports,
+        track_executed_lines=args.track_executed_lines,
+        collect_arg_values=not args.no_arg_values,
     )
     
     try:
@@ -73,8 +80,12 @@ def main():
                        help='Disable tracking of calls to functions outside the scope')
     parser.add_argument('--no-imports', action='store_true', 
                        help='Disable tracking of import related calls')
+    parser.add_argument('--track-executed-lines', action='store_true',
+                       help='Track all executed lines of code (file path, line number)')
     parser.add_argument('script_args', nargs='*', help='Arguments for the script being traced')
-    
+    parser.add_argument('--no-arg-values', action='store_true',
+                       help="Dont store function argument values in the trace")
+
     args, unknown = parser.parse_known_args()
     
     # Import tracer modules
@@ -106,7 +117,14 @@ def main():
     print(f"Tracing scope: {scope_path}")
     track_external = not args.no_external_calls
     print(f"Track external calls: {track_external}")
-    start_tracing(scope_path=scope_path, main_file=script_to_trace, track_external_calls=track_external, track_imports=not args.no_imports)
+    start_tracing(
+        scope_path=scope_path, 
+        main_file=script_to_trace, 
+        track_external_calls=track_external, 
+        track_imports=not args.no_imports, 
+        track_executed_lines=args.track_executed_lines,
+        collect_arg_values=not args.no_arg_values,
+    )
     try:
         # Add script directory to path to ensure imports work
         script_dir = os.path.dirname(script_to_trace)
@@ -120,27 +138,6 @@ def main():
     finally:
         # Stop tracing and output results
         stop_tracing(args.output)
-
-'''
-def run_tracer(args):
-    """Run the tracer with the given arguments."""
-    from tracer.core import start_tracing, stop_tracing
-    
-    # Start tracing with the provided arguments
-    start_tracing(
-        scope_path=getattr(args, 'scope_path', None),
-        main_file=getattr(args, 'main_file', None),
-        track_external_calls=getattr(args, 'track_external_calls', True)
-    )
-    
-    # Execute the target script/module
-    if hasattr(args, 'target') and args.target:
-        exec(open(args.target).read())
-    
-    # Stop tracing and save output
-    output_file = getattr(args, 'output_file', None)
-    return stop_tracing(output_file)
-'''
 
 def where_command():
     from tracer.where import main as where_main
@@ -160,6 +157,7 @@ def where_command():
     # Optional arguments
     parser.add_argument("-o", "--output_file", type=str, help="File name to save the tracing output")
     parser.add_argument("--scope", type=str, default=None, help="Constrain the logging to the given scope. If None, it logs all traces.")
+    parser.add_argument("--track-executed-lines", action="store_true", help="Track all executed lines of code (file path, line number)")
     
     # Parse known args to handle script arguments
     args, script_args = parser.parse_known_args()
@@ -178,6 +176,9 @@ def where_command():
     scope_path = None
     if args.scope:
         scope_path = os.path.abspath(os.path.expanduser(args.scope))
+    else:
+        # Default to the directory containing the script
+        scope_path = os.path.dirname(script_path)
     
     print(f"Running trace_where:")
     print(f"  Script: {script_path}")
@@ -195,7 +196,8 @@ def where_command():
         iterations=args.iterations,
         output_file=output_file,
         scope_path=scope_path,  # Changed from scope_dir
-        script_args=script_args
+        script_args=script_args,
+        track_executed_lines=args.track_executed_lines
     )
 
 if __name__ == "__main__":

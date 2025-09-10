@@ -143,7 +143,48 @@ def get_source_line(frame):
             # Strip whitespace and return the line
             line = line.strip()
             
-            # For multi-line calls, try to get additional context
+            # NEW: Check if this line looks like a continuation (doesn't start with expected keywords)
+            # If so, look backwards to find the start of the statement
+            if line and not line.startswith(('class ', 'def ', 'if ', 'while ', 'for ', 'with ', 'try:', 'except', 'import ', 'from ')):
+                # Check if the line looks like it might be part of a multi-line statement
+                # (e.g., ends with '):', contains base classes, etc.)
+                if ('):' in line or 
+                    (line.endswith(':') and ('(' in line or ')' in line)) or
+                    (line.count(')') > line.count('('))):
+                    
+                    # Look backwards to find the start of the statement
+                    backward_lines = []
+                    for i in range(1, 6):  # Look back up to 5 lines
+                        prev_line = linecache.getline(filename, lineno - i)
+                        if prev_line:
+                            prev_line_stripped = prev_line.strip()
+                            # Prepend this line
+                            backward_lines.insert(0, prev_line_stripped)
+                            
+                            # Check if this looks like the start of a statement
+                            if (prev_line_stripped.startswith(('class ', 'def ', 'if ', 'while ', 'for ', 'with ', 'try:', 'except', 'import ', 'from ')) or
+                                # Also check if we've balanced parentheses/brackets
+                                (' = ' in prev_line_stripped and not prev_line_stripped.endswith(','))):
+                                # Found the start, combine all lines
+                                combined = ' '.join(backward_lines) + ' ' + line
+                                # Check if parentheses are balanced
+                                if (combined.count('(') == combined.count(')') and
+                                    combined.count('[') == combined.count(']') and
+                                    combined.count('{') == combined.count('}')):
+                                    line = combined
+                                    break
+                                # If not balanced, continue looking back
+                        else:
+                            break
+                    
+                    # If we collected backward lines but didn't find a clear start,
+                    # use what we have if it looks reasonable
+                    if backward_lines and line.endswith('):'):
+                        combined = ' '.join(backward_lines) + ' ' + line
+                        if 'class ' in combined or 'def ' in combined:
+                            line = combined
+            
+            # For multi-line calls, try to get additional context (looking forward)
             # Check if the line looks incomplete (ends with comma, opening paren, etc.)
             if line and (line.endswith(',') or line.endswith('(') or 
                        line.count('(') > line.count(')') or
